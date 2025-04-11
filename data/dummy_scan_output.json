@@ -1,0 +1,54 @@
+{
+    "scan": {
+        "192.168.1.100": {
+            "hostnames": [{"name": "test-server", "type": "PTR"}],
+            "addresses": {"ipv4": "192.168.1.100"},
+            "ports": [
+                {
+                    "port": 80,
+                    "state": "open",
+                    "protocol": "tcp",
+                    "service": {
+                        "name": "http",
+                        "product": "Apache httpd",
+                        "version": "2.4.41"
+                    }
+                },
+                {
+                    "port": 3306,
+                    "state": "open",
+                    "protocol": "tcp",
+                    "service": {
+                        "name": "mysql",
+                        "product": "MySQL",
+                        "version": "5.7.32"
+                    }
+                },
+                {
+                    "port": 22,
+                    "state": "open",
+                    "protocol": "tcp",
+                    "service": {
+                        "name": "ssh",
+                        "product": "OpenSSH",
+                        "version": "7.6p1 Ubuntu-4ubuntu0.3"
+                    }
+                }
+            ],
+            "osmatch": [
+                {
+                    "name": "Linux 4.15 - 5.6",
+                    "accuracy": "100",
+                    "osclass": [
+                        {
+                            "type": "general purpose",
+                            "vendor": "Linux",
+                            "osfamily": "Linux",
+                            "osgen": "4.X"
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+} 
