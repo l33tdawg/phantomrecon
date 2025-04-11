@@ -58,7 +58,7 @@ phantomrecon/
 ## Setup
 
 1.  Clone the repository.
-2.  Ensure prerequisites are installed: `python3`, `pip`, `nmap`, `dig`, `whois`.
+2.  Ensure prerequisites are installed: `python3`, `pip`, `nmap`, `dig`, `whois`, `sqlmap`, `wapiti`, `wpscan`, `searchsploit`.
 3.  Create a virtual environment:
     ```bash
     python3 -m venv venv
@@ -83,4 +83,38 @@ This tool is for authorized security testing and educational purposes **only**. 
 
 ## License
 
-MIT License (Please add the actual license text to the LICENSE file) 
+MIT License (Please add the actual license text to the LICENSE file)
+
+### Prerequisites
+
+*   Python 3.9+
+*   pip (Python package installer)
+*   Nmap (`sudo apt install nmap` or `brew install nmap`)
+*   dig (`sudo apt install dnsutils` or `brew install bind`)
+*   whois (`sudo apt install whois` or `brew install whois`)
+*   sqlmap (`sudo apt install sqlmap` or `brew install sqlmap`)
+*   wapiti (`sudo apt install wapiti` or `brew install wapiti`)
+*   wpscan (`sudo apt install ruby-full` then `gem install wpscan` or `brew install wpscan`)
+*   searchsploit (`sudo apt install exploitdb` or `brew install exploitdb`)
+*   A Google Cloud Project with the Gemini API enabled.
+*   An API Key for the Gemini API.
+*   Python libraries listed in `requirements.txt` (install via `pip install -r requirements.txt`)
+
+### Key Features
+
+*   **Agent-Based Workflow:** Utilizes Google's Agent Development Kit (ADK) for a modular structure.
+*   **Interactive Target Input:** Uses `adk web` interface to ask the user for the target IP/domain.
+*   **Multi-Stage Assessment:**
+    *   **Reconnaissance:**
+        *   Nmap port scanning (Real)
+        *   Enhanced DNS/WHOIS lookups (Real: `dig`, `nslookup`, `dig +trace`, AXFR attempt, `whois`)
+        *   Web Search (Real, using Google Search)
+        *   Enhanced Web Content Analysis (Real: links, forms, comments, scripts, headers, emails, basic tech detection)
+        *   Data Aggregation
+    *   **Planning:** LLM (Gemini) analyzes recon data to generate a prioritized attack plan (with validation).
+    *   **Exploitation (Conditional Routing):** Executes tests based on the plan:
+        *   **Web:** Default files, Misconfigurations (Dir Listing), SQL Injection (via `sqlmap` with refined options), Wapiti scan (parsed results), WPScan (parsed results, conditional), Basic Reflected XSS, Basic Command Injection - (Real Checks)
+        *   **SQL:** Default Credentials (MySQL/PostgreSQL), Version Vulnerabilities (via `searchsploit` with refined query), Post-Auth Enumeration (via `sqlmap` direct connect) - (Real Checks)
+        *   **SSH:** Weak Credentials, Version Vulnerabilities (via `searchsploit` with refined query), Configuration Audit (via `ssh-audit`, parsed results) - (Real Checks)
+    *   **Reporting:** Generates a Markdown summary report.
+*   **State Management:** Uses ADK's `ToolContext` to pass data between agents/tools. 
