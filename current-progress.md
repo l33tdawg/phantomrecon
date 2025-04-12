@@ -79,7 +79,7 @@ This document outlines the current status of the PhantomRecon project and identi
     *   Modified `_safe_db_connect` and `_safe_ssh_connect` to return status codes distinguishing auth failures from connection errors.
     *   Updated `_test_default_credentials` and `_test_weak_credentials` to use the new statuses for more accurate reporting. (Addresses part of Pending Item 3)
 *   **Added State Validation:**
-    *   Added checks in web/SQL exploit functions (`_test_basic_sqli`, `_test_basic_xss`, `_test_basic_command_injection`, `_run_sqlmap_direct_exploit`) to ensure required state data (e.g., `web_analysis_results`) exists before use. (Addresses part of Pending Item 3)
+    *   Added explicit checks in various functions (`analyze_web_content`, `aggregate_recon_data`, exploit orchestrators `run_web_exploits`, `run_sql_exploits`, `run_ssh_exploits`, individual web/SQL tests `_test_basic_sqli`, `_test_basic_xss`, `_test_basic_command_injection`, and `generate_final_report`) to ensure required data (e.g., `initial_target`, `web_search_results`, `attack_plan`, `recon`, `web_analysis_results`) exists in the session state before use. (Addresses part of Pending Item 3)
 *   **Improved Reporting:**
     *   Updated report generation for `ssh-audit` results to use the parsed findings structure, clearly listing weak algorithms and recommendations. (Addresses part of Pending Item 4)
 
@@ -96,8 +96,7 @@ This document outlines the current status of the PhantomRecon project and identi
 
 3.  **Improve Error Handling & Robustness:**
     *   **Tool Failures:** Implement more granular error handling *within* external tools (`nmap`, `sqlmap`, `wapiti`, etc.) if they fail mid-execution (beyond initial checks/return codes). Provide clearer feedback in the report.
-    *   **Connection Errors:** Differentiate better between authentication failures and connection/network errors in exploit checks (`_safe_db_connect`, `_safe_ssh_connect`).
-    *   **State Validation:** Add more explicit checks *within* tools to ensure required data exists in the state before use (e.g., check `web_analysis_results` structure before XSS/SQLi/CmdI tests use it).
+    *   **State Validation:** Further refine state validation checks *within* tools for edge cases or complex data structures.
 
 4.  **Enhance Reporting:**
     *   Fix any lingering formatting issues (e.g., SSH report section).

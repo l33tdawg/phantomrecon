@@ -354,37 +354,57 @@ def perform_web_search(context: ToolContext) -> Dict[str, Any]:
 
 def analyze_web_content(context: ToolContext) -> List[Dict[str, Any]]:
     """
-    Fetches and analyzes basic elements for *all* relevant URLs found in web search results (state).
-    Appends findings for each URL to state['web_analysis_results'].
+    Analyzes content (headers, comments, forms, links) from URLs found in web search.
+    Extracts server info, emails, technologies, and comments.
+    Requires 'web_search_results' with a 'urls' list in session state.
 
     Args:
-        context (ToolContext): ADK ToolContext containing session state.
+        context (ToolContext): ADK ToolContext.
 
     Returns:
-        List[Dict[str, Any]]: A list of analysis result dictionaries for each URL processed in this run.
+        List[Dict[str, Any]]: Analysis results for each URL (also stored in state['web_analysis_results']).
     """
-    # Initialize results list in state if it doesn't exist
-    if 'web_analysis_results' not in context.session.state:
-        context.session.state['web_analysis_results'] = []
+    logger.info("Starting web content analysis.")
+    analysis_results = []
 
-    current_run_analyses = []
-    urls_to_analyze = context.session.state.get('web_search_results', {}).get('results', [])
+    # --- State Validation ---
+    web_search_results = context.session.state.get('web_search_results')
+    if not isinstance(web_search_results, dict):
+        logger.warning("State validation failed: 'web_search_results' missing or not a dictionary.")
+        context.session.state['web_analysis_results'] = []
+        return [{"error": "Web search results missing or invalid.", "url": "N/A"}] # Return error indication
+
+    urls_to_analyze = web_search_results.get('urls')
+    if not isinstance(urls_to_analyze, list):
+        logger.warning("State validation failed: 'web_search_results[\"urls\"]' missing or not a list.")
+        context.session.state['web_analysis_results'] = []
+        return [{"error": "URLs missing from web search results.", "url": "N/A"}] # Return error indication
 
     if not urls_to_analyze:
-        logger.warning("No URLs found in state ('web_search_results') to analyze.")
-        return current_run_analyses # Return empty list
+         logger.info("No URLs found in web search results to analyze.")
+         context.session.state['web_analysis_results'] = []
+         return [] # Return empty list if no URLs
 
-    logger.info(f"Starting web content analysis for {len(urls_to_analyze)} URLs found in state.")
+    # Limit analysis to a reasonable number (e.g., first 5)
+    MAX_URLS_TO_ANALYZE = 5
+    urls_to_analyze = urls_to_analyze[:MAX_URLS_TO_ANALYZE]
+    logger.info(f"Analyzing content for up to {len(urls_to_analyze)} URLs: {urls_to_analyze}")
+    # --- End State Validation ---
 
-    # --- Loop through each URL --- 
+    # Ensure requests is available
+    if requests is None:
+        logger.error("The 'requests' library is required for web analysis but not installed.")
+        return [{"error": "Web analysis requires 'requests' library but it's not installed.", "url": "N/A"}]
+
+    # Use a specific user-agent
+    headers = {'User-Agent': 'PhantomRecon-Analyzer/1.0'}
+
     for url in urls_to_analyze:
         if not isinstance(url, str) or not url.startswith(('http://', 'https://')):
             logger.warning(f"Skipping invalid URL format for analysis: {url}")
             continue
             
         logger.info(f"Analyzing content for: {url}")
-        # Use a specific user-agent
-        headers = {'User-Agent': 'PhantomRecon-Analyzer/1.0'}
         response = _safe_request(url, method="GET", allow_redirects=True, headers=headers)
         
         # Initialize analysis dict for this URL
@@ -405,7 +425,7 @@ def analyze_web_content(context: ToolContext) -> List[Dict[str, Any]]:
 
         if response is None:
             logger.warning(f"Failed to fetch {url} for analysis.")
-            current_run_analyses.append(analysis)
+            analysis_results.append(analysis)
             context.session.state['web_analysis_results'].append(analysis)
             continue # Move to the next URL
             
@@ -434,7 +454,7 @@ def analyze_web_content(context: ToolContext) -> List[Dict[str, Any]]:
             logger.info(f"Skipping HTML analysis for non-HTML content-type ({content_type}) at {url}")
             analysis["status"] = "skipped_non_html"
             analysis["error_message"] = f"Content-type is not HTML ({content_type})"
-            current_run_analyses.append(analysis)
+            analysis_results.append(analysis)
             context.session.state['web_analysis_results'].append(analysis)
             continue # Move to the next URL
 
@@ -536,80 +556,65 @@ def analyze_web_content(context: ToolContext) -> List[Dict[str, Any]]:
         # --- End HTML Parsing --- 
 
         # Append results for this URL to state and current run list
-        current_run_analyses.append(analysis)
+        analysis_results.append(analysis)
         context.session.state['web_analysis_results'].append(analysis)
         logger.debug(f"Appended web analysis results for {url} to session state.")
     # --- End URL Loop --- 
 
-    logger.info(f"Finished web content analysis for {len(current_run_analyses)} URLs.")
-    return current_run_analyses # Return list of results from this run
+    logger.info(f"Finished web content analysis for {len(analysis_results)} URLs.")
+    return analysis_results # Return list of results from this run
 
 # --- Aggregation Function ---
 
 def aggregate_recon_data(context: ToolContext, parallel_results: Dict[str, Any]) -> Dict[str, Any]:
-     """
-     Aggregates results from parallel reconnaissance tools and web analysis.
-     Reads nmap/dns/web_search from parallel_results dict.
-     Reads web_analysis_results from session state.
-     Writes final aggregated data to state['aggregated_recon_data'].
+    """
+    Combines results from parallel reconnaissance tasks (Nmap, DNS, Web Search, Web Analysis).
+    Retrieves 'initial_target' from state for context.
 
-     Args:
-          context (ToolContext): ADK ToolContext for accessing session state.
-          parallel_results (Dict[str, Any]): The dictionary output from the Parallel recon_workflow agent.
+    Args:
+        context (ToolContext): ADK ToolContext.
+        parallel_results (Dict[str, Any]): Dictionary containing results from parallel tasks.
+            Expected keys: 'nmap_scan_results', 'dns_recon_results', 'web_search_results', 'web_analysis_results'
 
-     Returns:
-          Dict[str, Any]: Dictionary containing aggregated recon data.
-     """
-     logger.info("Aggregating parallel reconnaissance and web analysis results...")
-     
-     # Get results from parallel execution
-     nmap_results = parallel_results.get("Nmap Port Scanner", {})
-     dns_results = parallel_results.get("DNS/WHOIS Recon", {})
-     web_search_results = parallel_results.get("Web Search Simulator", {})
-     
-     # Get web analysis results from state (populated by web_analysis_tool)
-     web_analysis_results = context.session.state.get('web_analysis_results', [])
+    Returns:
+        Dict[str, Any]: Aggregated reconnaissance data (also stored in state['recon']).
+    """
+    logger.info("Aggregating reconnaissance data from parallel tasks.")
 
-     aggregated_data = {
-         "recon_summary": {},
-         "nmap_scan_results": nmap_results,
-         "dns_recon_results": dns_results,
-         "web_search_results": web_search_results,
-         "web_analysis_results": web_analysis_results, # Include analysis results
-         "errors": [] 
-     }
+    # --- State Validation ---
+    target = context.session.state.get('initial_target')
+    if not target:
+        logger.error("State validation failed: 'initial_target' missing in session state during aggregation.")
+        aggregated_data = {"error": "Initial target missing in state.", **parallel_results}
+        context.session.state['recon'] = aggregated_data # Store partial/error state
+        return aggregated_data
+    # --- End State Validation ---
 
-     # Populate summary and collect errors
-     if nmap_results and nmap_results.get("error"):
-          aggregated_data["errors"].append(f"Nmap Error: {nmap_results['error']}")
-     elif nmap_results and nmap_results.get("scan"):
-         aggregated_data["recon_summary"]["nmap_hosts"] = list(nmap_results["scan"].keys())
-     
-     if dns_results and dns_results.get("error"):
-          aggregated_data["errors"].append(f"DNS/WHOIS Error: {dns_results['error']}")
-     elif dns_results:
-         aggregated_data["recon_summary"]["discovered_subdomains"] = dns_results.get("subdomains", [])
-         if dns_results.get("errors"): 
-              aggregated_data["errors"].extend(dns_results["errors"])
+    aggregated_data = {
+        "target": target,
+        # Use .get() with default empty dict/list to handle cases where a task might have failed
+        "nmap_scan": parallel_results.get('nmap_scan_results', {'scan': {}, 'error': 'Nmap results missing'}),
+        "dns_recon": parallel_results.get('dns_recon_results', {'error': 'DNS recon results missing'}),
+        "web_search": parallel_results.get('web_search_results', {'urls': [], 'error': 'Web search results missing'}),
+        "web_analysis": parallel_results.get('web_analysis_results', [{'error': 'Web analysis results missing'}])
+    }
 
-     if web_search_results and web_search_results.get("error"):
-          aggregated_data["errors"].append(f"Web Search Error: {web_search_results['error']}")
-     elif web_search_results:
-         aggregated_data["recon_summary"]["discovered_urls"] = web_search_results.get("results", [])
-         
-     # Add summary for web analysis
-     if web_analysis_results:
-          analyzed_urls = [res.get('url') for res in web_analysis_results if res and res.get('url')]
-          aggregated_data["recon_summary"]["analyzed_urls_count"] = len(analyzed_urls)
-          # Could add counts of forms, scripts found, etc.
-     
-     # Store the final aggregated data in the state
-     context.session.state['aggregated_recon_data'] = aggregated_data
-     logger.info(f"Finished aggregating all reconnaissance data. Summary: {aggregated_data['recon_summary']}")
-     if aggregated_data["errors"]:
-         logger.warning(f"Aggregation found errors in recon/analysis tools: {aggregated_data['errors']}")
-     
-     return aggregated_data 
+    # Basic validation/logging of results received
+    for key, value in parallel_results.items():
+        if isinstance(value, dict) and value.get('error'):
+            logger.warning(f"Aggregation detected error in '{key}': {value['error']}")
+        elif isinstance(value, list) and value and isinstance(value[0], dict) and value[0].get('error'):
+             logger.warning(f"Aggregation detected error in first item of '{key}': {value[0]['error']}")
+        elif not value:
+             logger.warning(f"Aggregation received empty results for '{key}'.")
+        else:
+             logger.info(f"Successfully aggregated results for '{key}'.")
+
+    # Store the final aggregated data in session state under the key 'recon'
+    context.session.state['recon'] = aggregated_data
+    logger.debug("Stored aggregated reconnaissance data in session state['recon'].")
+
+    return aggregated_data
 
 # --- Shared Helper for Web Analysis --- 
 def _safe_request(url: str, method: str = "GET", **kwargs) -> Optional[requests.Response]:
