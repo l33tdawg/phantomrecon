@@ -1,5 +1,7 @@
 # AI-RedTeam-Agent -> PhantomRecon
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 **PhantomRecon** is a CLI-based, modular, agent-driven red team automation tool designed to demonstrate autonomous offensive security workflows powered by AI (Google's Gemini via Agent Development Kit - ADK).
 
 Built as a proof-of-concept, it simulates identifying a target, performing broad reconnaissance (Nmap, DNS, Web Search), planning an attack strategy using an LLM, executing simulated exploits conditionally, and generating a report.
@@ -23,14 +25,12 @@ phantomrecon/
 │   └── dummy_scan_output.json # Example Nmap data if no target specified
 ├── demos/
 │   └── walkthrough.md        # Demo steps
-├── prompts/
-│   └── attack_planner_prompt.txt # Prompt for the LLM planning agent
+├── prompts/                  # Prompt templates for LLM agents
 ├── reports/
 │   └── sample_report.md      # Example output report
 ├── requirements.txt          # Python dependencies (includes google-adk)
-├── LICENSE                   # Project License
-├── prd.md                    # Product Requirements Document
-└── .env                      # Environment variables (ADK/Gemini API keys)
+├── .gitignore                # Files excluded from version control
+└── LICENSE                   # MIT License
 ```
 
 ## Current Workflow
@@ -83,7 +83,7 @@ This tool is for authorized security testing and educational purposes **only**. 
 
 ## License
 
-MIT License (Please add the actual license text to the LICENSE file)
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 ### Prerequisites
 
