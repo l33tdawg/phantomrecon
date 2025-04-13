@@ -130,4 +130,5 @@ cython_debug/
 
 # Project specific files
 current-progress.md
-*prd* 
+prd.md
+*.txt
