@@ -1,5 +1,0 @@
-=== Session Info ===
-['BaseSessionService', 'DatabaseSessionService', 'InMemorySessionService', 'Session', 'State', 'VertexAiSessionService', '__all__', '__builtins__', '__cached__', '__doc__', '__file__', '__loader__', '__name__', '__package__', '__path__', '__spec__', 'base_session_service', 'database_session_service', 'in_memory_session_service', 'logger', 'logging', 'session', 'state', 'vertex_ai_session_service']
-
-=== ToolContext Info ===
-(<class 'google.adk.tools.tool_context.ToolContext'>, <class 'google.adk.agents.callback_context.CallbackContext'>, <class 'google.adk.agents.readonly_context.ReadonlyContext'>, <class 'object'>)

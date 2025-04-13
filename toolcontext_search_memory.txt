@@ -1,5 +1,0 @@
-Help on function search_memory in module google.adk.tools.tool_context:
-
-search_memory(self, query: 'str') -> "'SearchMemoryResponse'"
-    Searches the memory of the current user.
-
