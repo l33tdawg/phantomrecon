@@ -75,4 +75,52 @@ Focus on:
 }
 ```
 
+Given the reconnaissance data, analyze open ports, services, and vulnerabilities to plan potential security tests.
+
+For each identified service in the scan data, create an attack plan specifying:
+1. Target host and port
+2. Service name, product, and version 
+3. A list of appropriate security tests to run based on the service type
+
+Format the output as a JSON object where each key is a unique service identifier (like "web_80" or "ssh_22") 
+and the value contains target_host, port, service_name, product, version, and a tests array.
+
+For example:
+{
+  "web_80": {
+    "target_host": "192.168.1.10",
+    "port": 80,
+    "service_name": "http",
+    "product": "Apache",
+    "version": "2.4.41",
+    "tests": [
+      "version_vulnerabilities", 
+      "directory_traversal",
+      "default_files",
+      "misconfigurations"
+    ]
+  },
+  "ssh_22": {
+    "target_host": "192.168.1.10",
+    "port": 22,
+    "service_name": "ssh",
+    "product": "OpenSSH",
+    "version": "8.2p1",
+    "tests": [
+      "version_vulnerabilities",
+      "weak_credentials",
+      "ssh_config_audit"
+    ]
+  }
+}
+
+Focus on common services like:
+- Web servers (HTTP/HTTPS): Check for known vulnerabilities, misconfigurations, default files, directory traversal
+- Databases (MySQL, PostgreSQL): Check for default credentials, version vulnerabilities, unauthorized access
+- SSH: Check for weak configurations, outdated versions, authentication bypass
+- FTP: Check for anonymous access, outdated versions, directory traversal
+- SMTP/Mail: Check for open relay, outdated versions, information disclosure
+
+If no actionable services are found, return an empty JSON object {}.
+
 Generate the JSON attack plan based on the input reconnaissance data. 

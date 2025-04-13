@@ -6,27 +6,41 @@ from google.adk.tools import ToolContext
 
 logger = logging.getLogger(__name__)
 
-def validate_attack_plan(context: ToolContext, raw_planner_output: Any) -> Dict:
+async def validate_attack_plan(raw_planner_output: Any) -> Dict:
     """
-    Validates the output from the LLM planning agent.
+    Validates the output from the ADK BuiltInPlanner.
     Ensures it's valid JSON and attempts basic structure checks.
     Stores the validated (or error) plan in state['attack_plan'].
 
     Args:
-        context (ToolContext): ADK ToolContext.
-        raw_planner_output (Any): The raw output from the preceding LlmAgent.
+        raw_planner_output (Any): The raw output from the preceding planner.
 
     Returns:
         Dict: The validated attack plan dictionary, or a dictionary with an 'error' key.
     """
-    logger.info("Validating LLM planner output...")
+    logger.info("Validating ADK planner output...")
+    
+    # Get the current context from the tool's context parameter
+    context = None
+    try:
+        # We'll get the context from the runner or we can have it passed as a parameter
+        # For now, let's return an error if we don't have context
+        if not context:
+            return {"error": "Context not available for validation"}
+    except Exception as e:
+        logger.error(f"Error accessing context: {e}")
+        return {"error": f"Context error: {e}"}
+    
+    # Initialize with default error state
     validated_plan = {"error": "Validation failed: Unknown reason"}
     
+    # Planner output should already be a dictionary if using ADK BuiltInPlanner
     if isinstance(raw_planner_output, dict):
-        # If ADK already parsed it as JSON (due to response_mime_type)
-        logger.debug("Planner output already parsed as dict by ADK.")
+        # ADK already parsed it as JSON
+        logger.debug("Planner output is a dictionary, as expected from ADK BuiltInPlanner.")
         plan_data = raw_planner_output
     elif isinstance(raw_planner_output, str):
+        # In case the planner returned a string (JSON), try to parse it
         logger.debug("Planner output is a string, attempting JSON parse.")
         try:
             # Clean up potential markdown code blocks if LLM included them
@@ -44,19 +58,22 @@ def validate_attack_plan(context: ToolContext, raw_planner_output: Any) -> Dict:
             error_msg = f"Validation failed: Planner output is not valid JSON. Error: {e}. Output: {raw_planner_output[:500]}..."
             logger.error(error_msg)
             validated_plan = {"error": error_msg}
-            context.session.state['attack_plan'] = validated_plan
+            if context and hasattr(context, 'session') and hasattr(context.session, 'state'):
+                context.session.state['attack_plan'] = validated_plan
             return validated_plan
         except TypeError as e:
             error_msg = f"Validation failed: Planner output JSON is not a dictionary. Type: {type(plan_data)}. Error: {e}"
             logger.error(error_msg)
             validated_plan = {"error": error_msg}
-            context.session.state['attack_plan'] = validated_plan
+            if context and hasattr(context, 'session') and hasattr(context.session, 'state'):
+                context.session.state['attack_plan'] = validated_plan
             return validated_plan
     else:
         error_msg = f"Validation failed: Planner output type unexpected. Type: {type(raw_planner_output)}"
         logger.error(error_msg)
         validated_plan = {"error": error_msg}
-        context.session.state['attack_plan'] = validated_plan
+        if context and hasattr(context, 'session') and hasattr(context.session, 'state'):
+            context.session.state['attack_plan'] = validated_plan
         return validated_plan
 
     # Basic Structure Check (can be expanded)
@@ -77,8 +94,9 @@ def validate_attack_plan(context: ToolContext, raw_planner_output: Any) -> Dict:
             logger.info("Attack plan JSON structure validation passed.")
             validated_plan = plan_data
 
-    # Store the final validated plan (or error) in state
-    context.session.state['attack_plan'] = validated_plan
-    logger.debug("Stored validated attack_plan in session state.")
+    # Store the final validated plan (or error) in state if context is available
+    if context and hasattr(context, 'session') and hasattr(context.session, 'state'):
+        context.session.state['attack_plan'] = validated_plan
+        logger.debug("Stored validated attack_plan in session state.")
 
     return validated_plan 

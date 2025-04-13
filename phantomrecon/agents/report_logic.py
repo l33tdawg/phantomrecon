@@ -818,3 +818,19 @@ def _generate_html_report(md_content: str, html_path: str):
 # _generate_html_report helper can remain the same if needed, but call it from generate_final_report
 # def _generate_html_report(md_content: str, html_path: str):
 #    ... 
+
+def simple_generate_final_report(**kwargs):
+    """
+    A simplified wrapper for generate_final_report that helps ADK's automatic function calling.
+    
+    Returns:
+        A report string or dictionary
+    """
+    print("[REPORT] Using simplified report generation function")
+    context = kwargs.get('context')
+    
+    if not context:
+        print("[REPORT] No context provided, cannot generate report")
+        return {"error": "No context provided for report generation"}
+        
+    return generate_final_report(context) 

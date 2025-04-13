@@ -13,7 +13,7 @@ python-nmap>=0.7.1
 mysql-connector-python>=8.0.0
 markdown2>=2.4.0
 Jinja2>=3.0.0
-googlesearch-python # Added for real web search
+# googlesearch-python # Removed - now using ADK Google Search
 mysql-connector-python # Added for MySQL checks
 psycopg2-binary # Added for PostgreSQL checks
 paramiko # Added for SSH checks

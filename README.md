@@ -117,4 +117,78 @@ MIT License (Please add the actual license text to the LICENSE file)
         *   **SQL:** Default Credentials (MySQL/PostgreSQL), Version Vulnerabilities (via `searchsploit` with refined query), Post-Auth Enumeration (via `sqlmap` direct connect) - (Real Checks)
         *   **SSH:** Weak Credentials, Version Vulnerabilities (via `searchsploit` with refined query), Configuration Audit (via `ssh-audit`, parsed results) - (Real Checks)
     *   **Reporting:** Generates a Markdown summary report.
-*   **State Management:** Uses ADK's `ToolContext` to pass data between agents/tools. 
+*   **State Management:** Uses ADK's `ToolContext` to pass data between agents/tools.
+
+## Session State Persistence Fix
+
+This repo includes fixes for session state persistence issues in the Google ADK framework. The problem was that session state was not being properly carried over between agent runs in a sequential pipeline.
+
+### Main Issues Fixed:
+
+1. **Session State Persistence**: The `initial_target` value set by the ValidationAgent was not available in the ReconAgent, causing it to fail.
+   - Solution: We created a `SessionStateWrapper` in `session_fix.py` that maintains a global state cache and intercepts all state operations.
+
+2. **Command Execution**: The `UnsafeLocalCodeExecutor.execute()` method was missing, as the correct method is `execute_code()`.
+   - Solution: We implemented a custom `CommandExecutor` in `executor_fix.py` that properly handles command execution using asyncio.
+
+3. **Google Search Tool**: The GoogleSearchTool's API changed and needed to use `run_async()` instead of `run()`.
+   - Solution: We updated the code to use the correct method.
+
+4. **ADK Compatibility Fixes**: Fixed several incompatibilities with the latest ADK version:
+   - Created simplified wrapper functions for all tools to address ADK's automatic function calling limitations
+   - Enhanced the agent pipeline to include all stages: Validation, Recon, Planning, Exploitation, and Reporting
+   - Fixed context variable initialization issues in the parallel recon function
+   - SSH-audit tool now parses JSON output to extract structured findings (weak algorithms, recommendations) 
+   - Better handling of tool outputs throughout the pipeline
+
+5. **Refined Tool Output Parsing**: 
+   - SSH-audit tool now parses JSON output to extract structured findings (weak algorithms, recommendations) 
+   - Better handling of tool outputs throughout the pipeline
+
+## How the Fix Works
+
+1. We use monkey patching in `session_fix.py` to intercept all agent runs and wrap the session state.
+2. The wrapper duplicates all state operations to a global cache, ensuring persistence.
+3. For command execution, we use a custom implementation that doesn't rely on the UnsafeLocalCodeExecutor.
+4. Better error handling for session state access across all agents was added.
+
+## ADK Compatibility Fixes
+
+The application encountered several issues with the latest version of Google's Agent Development Kit (ADK):
+
+1. **Function Calling Changes**: ADK's function calling behavior changed, requiring adaptations to our tools:
+   - Created simplified wrapper functions with consistent signatures
+   - Added type annotations to all tool parameters
+   - Implemented better error handling for tool execution
+
+2. **Session Persistence**: ADK's session state management required several modifications:
+   - Implemented global cache for session variables
+   - Added state verification between agent transitions
+   - Fixed session variable initialization in parallel workflows
+
+3. **Agent Communication**: Enhanced inter-agent communication:
+   - Standardized output formats from all tools
+   - Improved parsing of structured data from external tool outputs
+   - Added validation checks for data passed between agents
+
+For more details, see the [README-ADK-FIXES.md](README-ADK-FIXES.md) file.
+
+## Usage
+
+Simply run the application as normal with:
+
+```bash
+adk run phantomrecon
+```
+
+The fix is applied automatically at startup in the `__init__.py` file.
+
+## Testing the Fix
+
+You can test just the session state functionality with:
+
+```bash
+adk run phantomrecon.session_test
+```
+
+This runs a test pipeline that sets and retrieves a value from session state. 

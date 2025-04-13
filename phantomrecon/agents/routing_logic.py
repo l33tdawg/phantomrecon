@@ -52,3 +52,19 @@ def decide_next_exploit(context: ToolContext, **kwargs: Any) -> Optional[str]:
     # If all relevant planned exploits have been attempted, proceed to next step (report)
     logger.info("All planned/attempted exploits routed. Proceeding to next step.")
     return None 
+
+def simple_decide_next_exploit(**kwargs):
+    """
+    A simplified wrapper for decide_next_exploit that helps ADK's automatic function calling.
+    
+    Returns:
+        The name of the next tool/agent to execute, or None
+    """
+    print("[ROUTER] Using simplified router function")
+    context = kwargs.get('context')
+    
+    if not context:
+        print("[ROUTER] No context provided, cannot determine next exploit")
+        return None
+        
+    return decide_next_exploit(context) 
