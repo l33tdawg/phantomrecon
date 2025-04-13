@@ -1,0 +1,793 @@
+#!/usr/bin/env python3
+import nmap
+import json
+from typing import Dict, List, Optional, Any, Tuple
+import os
+import logging
+import subprocess
+import shlex
+from google.adk.tools import ToolContext # Import ToolContext
+from bs4 import BeautifulSoup, Comment # Import BeautifulSoup and Comment
+import re # For finding comments
+from urllib.parse import urlparse # Import urlparse
+# Import requests safely
+try:
+    import requests
+except ImportError:
+    requests = None # Handle case where requests is not installed
+import time
+import ipaddress # For IP validation
+from google.adk.code_executors import UnsafeLocalCodeExecutor
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+def _load_dummy_data() -> Dict:
+    """Load dummy scan data for testing or when no target is specified."""
+    dummy_file = os.path.join(os.path.dirname(__file__), 
+                            '../data/dummy_scan_output.json')
+    try:
+        with open(dummy_file, 'r') as f:
+            logger.info("Loading dummy scan data.")
+            return json.load(f)
+    except FileNotFoundError:
+        logger.warning(f"Dummy data file not found at {dummy_file}. Cannot provide dummy data.")
+        # Return structure indicating error or empty scan
+        return {"scan": {}, "error": f"Dummy data file not found at {dummy_file}"}
+    except json.JSONDecodeError as e:
+        logger.error(f"Error decoding dummy data file {dummy_file}: {e}")
+        return {"error": "Failed to load or decode dummy data."}
+    except Exception as e:
+        logger.error(f"Unexpected error loading dummy data: {e}")
+        return {"error": f"Unexpected error loading dummy data: {e}"}
+
+async def perform_nmap_scan(context=None) -> Dict[str, Any]:
+    """
+    Performs an Nmap scan on the target and returns structured results.
+    Uses data in context.session.state['initial_target'] for scan target.
+    Stores results in context.session.state['nmap_scan_results'].
+
+    Args:
+        context: The tool context from the runner (optional).
+        
+    Returns:
+        Dict[str, Any]: Scan results (also stored in state['nmap_scan_results']).
+    """
+    # Use context parameter instead of importing get_current_context
+    # from google.adk.toolkit import get_current_context
+    # context = get_current_context()
+    
+    # Safely get target from state
+    target = None
+    if context and hasattr(context, 'session') and hasattr(context.session, 'state'):
+        target = context.session.state.get('initial_target') 
+    
+    if not target:
+        logger.warning("Target not found in session state for Nmap scan.")
+        results = {"error": "Target not found in session state."}
+        # Safely store in state if possible
+        if context and hasattr(context, 'session') and hasattr(context.session, 'state'):
+            context.session.state['nmap_scan_results'] = results
+        return results
+
+    logger.info(f"Starting Nmap scan for target: {target}")
+    
+    # Try to detect if target is an IP or domain name
+    is_ip = False
+    try:
+        # Just check if parseable as IP
+        ipaddress.ip_address(target)
+        is_ip = True
+    except ValueError:
+        # Assume it's a domain name
+        pass
+        
+    # Construct basic scan command  
+    scan_args = ['-sV', '-Pn', '--top-ports', '1000']
+    
+    command = ['nmap'] + scan_args + [target]
+    command_str = ' '.join(command)
+    
+    stdout, stderr, returncode = await _run_command_async(command, timeout=90)
+    
+    if returncode != 0:
+        logger.error(f"Nmap scan failed for {target}: {stderr}")
+        results = {
+            "error": f"Nmap scan failed with return code {returncode}",
+            "stderr": stderr,
+            "scan": {}
+        }
+    else:
+        logger.info(f"Nmap scan completed for {target}")
+        # Process the output into structured format
+        scan_results = _parse_nmap_output(stdout)
+        results = {
+            "scan": scan_results,
+            "command": command_str
+        }
+    
+    # Store result in session state if possible
+    if context and hasattr(context, 'session') and hasattr(context.session, 'state'):
+        context.session.state['nmap_scan_results'] = results
+        logger.debug("Stored nmap_scan_results in session state.")
+    else:
+        logger.warning("Could not access session state to store Nmap scan results.")
+        
+    return results
+
+# Note: analyze_vulnerabilities logic is removed from here.
+# It's better placed within the planner agent/tool which interprets the scan results. 
+
+# --- DNS and WHOIS Recon ---
+
+async def perform_dns_recon(context=None) -> Dict[str, Any]:
+    """
+    Performs DNS reconnaissance on target from state using ADK's command execution.
+    
+    Args:
+        context: The tool context from the runner (optional).
+        
+    Returns:
+        Dict[str, Any]: DNS recon results (also stored in state['dns_recon_results']).
+    """
+    # Use context parameter instead of importing get_current_context
+    # from google.adk.toolkit import get_current_context
+    # context = get_current_context()
+    
+    # Safely get target from state
+    target = None
+    if context and hasattr(context, 'session') and hasattr(context.session, 'state'):
+        target = context.session.state.get('initial_target')
+    
+    if not target:
+        logger.warning("Target not found in session state for DNS recon.")
+        results = {"error": "Target not found in session state."}
+        # Safely store in state if possible
+        if context and hasattr(context, 'session') and hasattr(context.session, 'state'):
+            context.session.state['dns_recon_results'] = results
+        return results
+    
+    # Check if target is likely an IP or domain
+    is_ip = False
+    try:
+        ipaddress.ip_address(target)
+        is_ip = True
+    except ValueError:
+        # Must be a domain name
+        pass
+        
+    logger.info(f"Starting DNS recon for target: {target}")
+    
+    # Initialize results dictionary
+    results = {
+        "target": target,
+        "dns_records": {},
+        "subdomains": [],
+        "ip_addresses": []
+    }
+    
+    # Use dig commands for more reliable DNS lookups
+    record_types = ["A", "AAAA", "MX", "NS", "TXT", "SOA", "CNAME"]
+    
+    # If target is an IP, try a reverse lookup first
+    if is_ip:
+        logger.info(f"Target is an IP address ({target}). Attempting reverse lookup.")
+        # Run reverse DNS lookup using dig
+        command = ["dig", "-x", target, "+short"]
+        stdout, stderr, returncode = await _run_command_async(command, timeout=10)
+        
+        if returncode == 0 and stdout:
+            # Clean up the output (strip periods at end, etc.)
+            reverse_domains = [line.strip().rstrip('.') for line in stdout.splitlines() if line.strip()]
+            results["reverse_lookups"] = reverse_domains
+            
+            # If we got a domain, we can continue to look up other records
+            if reverse_domains:
+                logger.info(f"Found domains via reverse lookup: {reverse_domains}")
+                # Use the first domain for additional lookups
+                target = reverse_domains[0]
+                is_ip = False
+            else:
+                logger.info(f"No reverse DNS records found for IP {target}")
+                results["dns_records"] = {"error": "No reverse DNS records found"}
+                
+        else:
+            logger.warning(f"Reverse lookup failed for IP {target}: {stderr}")
+            results["dns_records"] = {"error": f"Reverse lookup failed: {stderr}"}
+    
+    # Only proceed with DNS lookups if we have a domain
+    if not is_ip:
+        # Collect DNS records for each type
+        for record_type in record_types:
+            command = ["dig", target, record_type, "+short"]
+            stdout, stderr, returncode = await _run_command_async(command, timeout=10)
+            
+            if returncode == 0:
+                # Process the output based on record type
+                records = [line.strip() for line in stdout.splitlines() if line.strip()]
+                
+                if records:
+                    results["dns_records"][record_type] = records
+                    
+                    # Extract IP addresses from A/AAAA records
+                    if record_type in ["A", "AAAA"]:
+                        results["ip_addresses"].extend(records)
+            else:
+                logger.warning(f"Failed to get {record_type} records for {target}: {stderr}")
+    
+    # Look for common subdomains if target is a domain
+    if not is_ip:
+        await _find_subdomains(target, results)
+    
+    # Store results in session state
+    if context and hasattr(context, 'session') and hasattr(context.session, 'state'):
+        context.session.state['dns_recon_results'] = results
+        logger.debug("Stored dns_recon_results in session state.")
+    else:
+        logger.warning("Could not access session state to store DNS recon results.")
+    
+    return results
+
+async def _find_subdomains(target: str, results: Dict[str, Any], max_subdomains: int = 10) -> None:
+    """
+    Helper function to find subdomains using common prefixes.
+    Updates the results dictionary in-place.
+    """
+    common_subdomains = ["www", "mail", "smtp", "pop", "imap", "blog", "shop", 
+                         "dev", "api", "stage", "test", "admin", "secure"]
+    
+    found_subdomains = []
+    
+    for prefix in common_subdomains[:max_subdomains]:
+        subdomain = f"{prefix}.{target}"
+        command = ["dig", subdomain, "A", "+short"]
+        stdout, stderr, returncode = await _run_command_async(command, timeout=5)
+        
+        if returncode == 0 and stdout.strip():
+            # Found a valid subdomain with A record
+            ips = [line.strip() for line in stdout.splitlines() if line.strip()]
+            found_subdomains.append({"name": subdomain, "ip_addresses": ips})
+            logger.debug(f"Found subdomain: {subdomain} -> {ips}")
+    
+    results["subdomains"] = found_subdomains
+
+# --- Command Execution Helpers ---
+async def _run_command_async(command: List[str], timeout: int = 60) -> Tuple[str, str, int]:
+    """
+    Helper function to run a shell command using ADK's UnsafeLocalCodeExecutor.
+    Returns stdout, stderr, returncode.
+    """
+    try:
+        logger.debug(f"Running command: {' '.join(command)}")
+        
+        # Use ADK's code executor
+        executor = UnsafeLocalCodeExecutor()
+        result = await executor.execute(command=' '.join(command), timeout=timeout)
+        
+        return result.stdout.strip(), result.stderr.strip(), result.returncode
+        
+    except FileNotFoundError:
+        cmd_name = command[0]
+        err_msg = f"Error: Command '{cmd_name}' not found. Is it installed and in PATH?"
+        logger.error(err_msg)
+        return "", err_msg, -1  # Indicate file not found with -1
+    except asyncio.TimeoutError:
+        err_msg = f"Error: Command timed out after {timeout}s: {' '.join(command)}"
+        logger.warning(err_msg)
+        return "", err_msg, -2  # Indicate timeout with -2
+    except Exception as e:
+        err_msg = f"Unexpected error running command {' '.join(command)}: {e}"
+        logger.error(err_msg, exc_info=True)
+        return "", err_msg, -3  # Indicate other error with -3
+
+async def _run_command_detailed_async(command: str, timeout: int = 15) -> Tuple[str, str, int]:
+    """
+    More detailed command runner with proper escaping & better error messages.
+    Takes a command string instead of list.
+    """
+    try:
+        # Split the command string using shlex to handle quoted arguments properly
+        cmd_parts = shlex.split(command)
+        return await _run_command_async(cmd_parts, timeout)
+    except Exception as e:
+        logger.error(f"Error parsing or running detailed command '{command}': {e}")
+        return "", f"Command parsing/execution error: {e}", -3
+
+# --- Web Search and Analysis --- 
+
+# Import ADK Google Search
+from google.adk.tools import google_search_tool
+import asyncio
+
+# Removed ToolContext type hint for LlmAgent compatibility
+async def perform_web_search(context=None) -> Dict[str, Any]:
+    """
+    Performs a real web search for the target using Google ADK Search.
+    Stores results in session state.
+
+    Args:
+        context: The tool context from the runner (optional).
+        
+    Returns:
+        Dict[str, Any]: Search results (also stored in state['web_search_results']).
+    """
+    # Use context parameter instead of importing get_current_context
+    # from google.adk.toolkit import get_current_context
+    # context = get_current_context()
+    
+    # Safely get target from state
+    target = None
+    if context and hasattr(context, 'session') and hasattr(context.session, 'state'):
+        target = context.session.state.get('initial_target')
+    
+    if not target:
+        logger.warning("Target not found in session state for Web Search.")
+        results = {"error": "Target not found in session state."}
+        # Safely store in state if possible
+        if context and hasattr(context, 'session') and hasattr(context.session, 'state'):
+            context.session.state['web_search_results'] = results
+        return results
+        
+    logger.info(f"Performing web search for: {target}")
+    query = f"site:{target} OR related:{target}" # Search for site and related domains
+    search_results = []
+    status = "error" # Default to error
+    error_msg = None
+    
+    try:
+        # Initialize Google Search Tool
+        search_tool = google_search_tool.GoogleSearchTool()
+        
+        # Execute the search
+        logger.debug(f"Executing ADK Google search for query: '{query}'")
+        search_response = await search_tool.run(query=query)
+        
+        # Process the response
+        if search_response and hasattr(search_response, 'results'):
+            # Extract URLs from search results
+            for result in search_response.results:
+                if hasattr(result, 'url') and result.url:
+                    search_results.append(result.url)
+            status = "completed"
+            logger.info(f"Found {len(search_results)} results for query: '{query}'")
+        else:
+            error_msg = "No search results or invalid response format from ADK Google Search"
+            logger.warning(error_msg)
+            
+    except Exception as e:
+        # Handle potential search errors (e.g., rate limiting, network issues)
+        error_msg = f"Error during ADK Google search for '{target}': {e}" 
+        logger.error(error_msg, exc_info=True)
+        status = "error" 
+
+    results = {
+        "target": target,
+        "search_query": query,
+        "results": search_results, # List of URLs found
+        "status": status
+    }
+    if error_msg:
+        results["error"] = error_msg
+
+    # Store result in session state if possible
+    if context and hasattr(context, 'session') and hasattr(context.session, 'state'):
+        context.session.state['web_search_results'] = results
+        logger.debug("Stored web_search_results in session state.")
+    else:
+        logger.warning("Could not access session state to store web search results.")
+
+    return results
+
+# Removed ToolContext type hint for LlmAgent compatibility
+def analyze_web_content(context) -> List[Dict[str, Any]]:
+    """
+    Analyzes content (headers, comments, forms, links) from URLs found in web search.
+    Extracts server info, emails, technologies, and comments.
+    Requires 'web_search_results' with a 'results' list in session state.
+
+    Args:
+        context (ToolContext): ADK ToolContext.
+
+    Returns:
+        List[Dict[str, Any]]: Analysis results for each URL (also stored in state['web_analysis_results']).
+    """
+    logger.info("Starting web content analysis.")
+    analysis_results = []
+
+    # --- State Validation ---
+    web_search_results = context.session.state.get('web_search_results')
+    if not isinstance(web_search_results, dict):
+        logger.warning("State validation failed: 'web_search_results' missing or not a dictionary.")
+        context.session.state['web_analysis_results'] = []
+        return [{"error": "Web search results missing or invalid.", "url": "N/A"}] # Return error indication
+
+    urls_to_analyze = web_search_results.get('results')  # Changed from 'urls' to 'results'
+    if not isinstance(urls_to_analyze, list):
+        logger.warning("State validation failed: 'web_search_results[\"results\"]' missing or not a list.")
+        context.session.state['web_analysis_results'] = []
+        return [{"error": "URLs missing from web search results.", "url": "N/A"}] # Return error indication
+
+    if not urls_to_analyze:
+         logger.info("No URLs found in web search results to analyze.")
+         context.session.state['web_analysis_results'] = []
+         return [] # Return empty list if no URLs
+         
+    # Initialize web_analysis_results in state if it doesn't exist yet
+    if 'web_analysis_results' not in context.session.state:
+        context.session.state['web_analysis_results'] = []
+
+    # Limit analysis to a reasonable number (e.g., first 5)
+    MAX_URLS_TO_ANALYZE = 5
+    urls_to_analyze = urls_to_analyze[:MAX_URLS_TO_ANALYZE]
+    logger.info(f"Analyzing content for up to {len(urls_to_analyze)} URLs: {urls_to_analyze}")
+    # --- End State Validation ---
+
+    # Ensure requests is available
+    if requests is None:
+        logger.error("The 'requests' library is required for web analysis but not installed.")
+        return [{"error": "Web analysis requires 'requests' library but it's not installed.", "url": "N/A"}]
+
+    # Use a specific user-agent
+    headers = {'User-Agent': 'PhantomRecon-Analyzer/1.0'}
+
+    for url in urls_to_analyze:
+        if not isinstance(url, str) or not url.startswith(('http://', 'https://')):
+            logger.warning(f"Skipping invalid URL format for analysis: {url}")
+            continue
+            
+        logger.info(f"Analyzing content for: {url}")
+        response = _safe_request(url, method="GET", allow_redirects=True, headers=headers)
+        
+        # Initialize analysis dict for this URL
+        analysis = {
+            "url": url,
+            "status": "error",
+            "http_status_code": None,
+            "headers": {}, # Store relevant headers
+            "title": None,
+            "forms": [],
+            "scripts": [],
+            "comments": [],
+            "links": {"internal": [], "external": []},
+            "emails": [], # Store found emails
+            "technologies": [], # Store identified technologies
+            "error_message": "Request failed or returned no response."
+        }
+
+        if response is None:
+            logger.warning(f"Failed to fetch {url} for analysis.")
+            analysis_results.append(analysis)
+            context.session.state['web_analysis_results'].append(analysis)
+            continue # Move to the next URL
+            
+        analysis["http_status_code"] = response.status_code
+        analysis.pop("error_message", None) 
+        analysis["status"] = "completed"
+
+        # Capture relevant headers
+        relevant_headers = ['Server', 'X-Powered-By', 'Set-Cookie', 'Content-Type', 'X-Frame-Options', 'Content-Security-Policy']
+        for header_name in relevant_headers:
+            if header_name in response.headers:
+                 analysis["headers"][header_name] = response.headers[header_name]
+                 # Simple tech detection from headers
+                 if header_name == 'Server' and response.headers[header_name] not in analysis["technologies"]:
+                      analysis["technologies"].append(f"Server Header: {response.headers[header_name]}")
+                 if header_name == 'X-Powered-By' and response.headers[header_name] not in analysis["technologies"]:
+                      analysis["technologies"].append(f"X-Powered-By: {response.headers[header_name]}")
+
+        if response.status_code >= 400:
+            logger.warning(f"Received HTTP error {response.status_code} for {url}")
+            analysis["error_message"] = f"HTTP Error {response.status_code}"
+            analysis["status"] = "completed_with_errors"
+
+        content_type = response.headers.get('Content-Type', '').lower()
+        if 'html' not in content_type:
+            logger.info(f"Skipping HTML analysis for non-HTML content-type ({content_type}) at {url}")
+            analysis["status"] = "skipped_non_html"
+            analysis["error_message"] = f"Content-type is not HTML ({content_type})"
+            analysis_results.append(analysis)
+            context.session.state['web_analysis_results'].append(analysis)
+            continue # Move to the next URL
+
+        # --- Perform HTML Parsing (inside the loop) --- 
+        try:
+            # Extract Emails using Regex before parsing HTML structure
+            # Basic email regex - adjust for more complex cases if needed
+            email_pattern = r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}'
+            found_emails = re.findall(email_pattern, response.text)
+            if found_emails:
+                 analysis["emails"] = list(set(found_emails)) # Store unique emails
+                 logger.info(f"Found {len(analysis['emails'])} email(s) on {url}")
+
+            soup = BeautifulSoup(response.text, 'html.parser')
+
+            # Extract Title
+            if soup.title and soup.title.string:
+                analysis["title"] = soup.title.string.strip()
+
+            # Extract Meta Generator Tag for Tech Detection
+            meta_generator = soup.find('meta', attrs={'name': 'generator'})
+            if meta_generator and meta_generator.get('content') and meta_generator.get('content') not in analysis["technologies"]:
+                analysis["technologies"].append(f"Generator: {meta_generator.get('content')}")
+                logger.info(f"Identified generator tag: {meta_generator.get('content')}")
+
+            # Extract Forms
+            for form in soup.find_all('form'):
+                form_details = {
+                    "action": form.get('action', ''),
+                    "method": form.get('method', 'get').lower(),
+                    "inputs": []
+                }
+                for input_tag in form.find_all(['input', 'textarea', 'select']):
+                    input_info = {
+                        "tag": input_tag.name,
+                        "type": input_tag.get('type', 'text'),
+                        "name": input_tag.get('name')
+                    }
+                    # Add value only if it exists (avoiding None)
+                    value = input_tag.get('value')
+                    if value is not None:
+                         input_info['value'] = value
+                    form_details["inputs"].append(input_info)
+                analysis["forms"].append(form_details)
+
+            # Extract Script Sources & Basic Tech Check
+            found_jquery = False
+            found_react = False
+            for script in soup.find_all('script'):
+                src = script.get('src')
+                script_content = script.string # Get inline script content
+
+                if src:
+                    analysis["scripts"].append(urljoin(url, src))
+                    # Basic tech detection from script source URLs
+                    if 'jquery' in src.lower() and not found_jquery:
+                         analysis["technologies"].append("jQuery")
+                         found_jquery = True
+                    if ('react.js' in src.lower() or 'react.min.js' in src.lower()) and not found_react:
+                         analysis["technologies"].append("React")
+                         found_react = True
+                elif script_content: # Check inline script content
+                    if 'jQuery' in script_content or ' $.fn.' in script_content and not found_jquery:
+                         analysis["technologies"].append("jQuery (likely)")
+                         found_jquery = True
+                    if 'React.createElement' in script_content and not found_react:
+                         analysis["technologies"].append("React (likely)")
+                         found_react = True
+
+            # Check for React root element as another indicator
+            if soup.find(id='root') or soup.find(id='react-root') or soup.find("div", attrs={"data-reactroot": True}):
+                 if "React (likely)" not in analysis["technologies"] and "React" not in analysis["technologies"]:
+                      analysis["technologies"].append("React (likely via root element)")
+
+            # Extract Comments
+            comments = soup.find_all(string=lambda text: isinstance(text, Comment))
+            for comment in comments:
+                analysis["comments"].append(comment.strip())
+
+            # Extract Links
+            base_domain = urlparse(url).netloc
+            for a in soup.find_all('a', href=True):
+                href = a['href']
+                full_url = urljoin(url, href)
+                link_domain = urlparse(full_url).netloc
+                if link_domain == base_domain:
+                    analysis["links"]["internal"].append(full_url)
+                elif link_domain:
+                    analysis["links"]["external"].append(full_url)
+
+            # Remove duplicates from links
+            analysis["links"]["internal"] = list(set(analysis["links"]["internal"]))
+            analysis["links"]["external"] = list(set(analysis["links"]["external"]))
+
+        except Exception as e:
+            logger.error(f"Error parsing HTML content for {url}: {e}", exc_info=True)
+            analysis["error_message"] = f"HTML Parsing Error: {e}"
+            analysis["status"] = "completed_with_errors"
+        # --- End HTML Parsing --- 
+
+        # Append results for this URL to state and current run list
+        analysis_results.append(analysis)
+        context.session.state['web_analysis_results'].append(analysis)
+        logger.debug(f"Appended web analysis results for {url} to session state.")
+    # --- End URL Loop --- 
+
+    logger.info(f"Finished web content analysis for {len(analysis_results)} URLs.")
+    return analysis_results # Return list of results from this run
+
+# --- Aggregation Function ---
+
+# Removed ToolContext type hint for LlmAgent compatibility
+def aggregate_recon_data(context, parallel_results: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Combines results from parallel reconnaissance tasks (Nmap, DNS, Web Search, Web Analysis).
+    Retrieves 'initial_target' from state for context.
+
+    Args:
+        context (ToolContext): ADK ToolContext.
+        parallel_results (Dict[str, Any]): Dictionary containing results from parallel tasks.
+            Expected keys: 'nmap_scan_results', 'dns_recon_results', 'web_search_results', 'web_analysis_results'
+
+    Returns:
+        Dict[str, Any]: Aggregated reconnaissance data (also stored in state['recon']).
+    """
+    logger.info("Aggregating reconnaissance data from parallel tasks.")
+
+    # --- State Validation ---
+    target = context.session.state.get('initial_target')
+    if not target:
+        logger.error("State validation failed: 'initial_target' missing in session state during aggregation.")
+        aggregated_data = {"error": "Initial target missing in state.", **parallel_results}
+        context.session.state['recon'] = aggregated_data # Store partial/error state
+        return aggregated_data
+    # --- End State Validation ---
+
+    aggregated_data = {
+        "target": target,
+        # Use .get() with default empty dict/list to handle cases where a task might have failed
+        "nmap_scan": parallel_results.get('nmap_scan_results', {'scan': {}, 'error': 'Nmap results missing'}),
+        "dns_recon": parallel_results.get('dns_recon_results', {'error': 'DNS recon results missing'}),
+        "web_search": parallel_results.get('web_search_results', {'urls': [], 'error': 'Web search results missing'}),
+        "web_analysis": parallel_results.get('web_analysis_results', [{'error': 'Web analysis results missing'}])
+    }
+
+    # Basic validation/logging of results received
+    for key, value in parallel_results.items():
+        if isinstance(value, dict) and value.get('error'):
+            logger.warning(f"Aggregation detected error in '{key}': {value['error']}")
+        elif isinstance(value, list) and value and isinstance(value[0], dict) and value[0].get('error'):
+             logger.warning(f"Aggregation detected error in first item of '{key}': {value[0]['error']}")
+        elif not value:
+             logger.warning(f"Aggregation received empty results for '{key}'.")
+        else:
+             logger.info(f"Successfully aggregated results for '{key}'.")
+
+    # Store the final aggregated data in session state under the key 'recon'
+    context.session.state['recon'] = aggregated_data
+    logger.debug("Stored aggregated reconnaissance data in session state['recon'].")
+
+    return aggregated_data
+
+# --- Shared Helper for Web Analysis --- 
+def _safe_request(url: str, method: str = "GET", **kwargs) -> Optional[requests.Response]:
+    """Make a safe HTTP request with error handling and user agent."""
+    if requests is None:
+        logger.error("The 'requests' library is required for web analysis but not installed.")
+        return None
+        
+    session = requests.Session()
+    session.headers.update({
+        'User-Agent': 'PhantomRecon-Analyzer/1.0' 
+    })
+    kwargs.setdefault('allow_redirects', True) # Follow redirects for analysis
+    kwargs.setdefault('timeout', 15) 
+    kwargs.setdefault('verify', False) # Insecure: Accept self-signed certs for testing
+    if not kwargs.get('verify', True):
+        try:
+            import urllib3
+            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+        except (ImportError, AttributeError):
+            pass 
+
+    try:
+        logger.debug(f"Making {method} request to {url} for analysis")
+        response = session.request(method, url, **kwargs)
+        response.raise_for_status() # Raise HTTPError for bad responses (4xx or 5xx)
+        return response
+    except requests.exceptions.Timeout:
+        logger.warning(f"Analysis request timed out for {url}")
+        return None
+    except requests.exceptions.ConnectionError as e:
+        logger.warning(f"Analysis connection error for {url}: {e}")
+        return None
+    except requests.exceptions.HTTPError as e:
+        logger.warning(f"Analysis HTTP error for {url}: {e.response.status_code} {e.response.reason}")
+        # Return the response object even on HTTP error, maybe analysis can still work?
+        return e.response 
+    except requests.exceptions.RequestException as e:
+        logger.warning(f"Analysis request failed for {url}: {e}")
+        return None
+
+def _parse_nmap_output(nmap_output: str) -> Dict[str, Any]:
+    """
+    Parse raw nmap output text into a structured dictionary.
+    
+    Args:
+        nmap_output (str): Raw nmap command output
+        
+    Returns:
+        Dict[str, Any]: Structured scan results
+    """
+    results = {}
+    current_host = None
+    host_data = {}
+    
+    lines = nmap_output.split('\n')
+    
+    # First pass - get host info
+    for line in lines:
+        line = line.strip()
+        
+        # Identify host
+        if line.startswith('Nmap scan report for '):
+            if current_host and host_data:
+                results[current_host] = host_data
+            
+            current_host = line.replace('Nmap scan report for ', '').strip()
+            host_data = {
+                'addresses': {},
+                'hostnames': [],
+                'tcp': {},
+                'status': 'unknown'
+            }
+            
+        # Host status
+        elif line.startswith('Host is '):
+            host_data['status'] = line.split('Host is ')[1].split()[0].lower()
+            
+        # IP/hostname correlation
+        elif ' (' in line and ')' in line and 'scan report' in line:
+            try:
+                # Format like "Nmap scan report for example.com (93.184.216.34)"
+                parts = line.split(' (')
+                hostname = parts[0].replace('Nmap scan report for ', '').strip()
+                ip = parts[1].replace(')', '').strip()
+                host_data['hostnames'].append({'name': hostname, 'type': 'user'})
+                host_data['addresses']['ipv4'] = ip
+                # Update current_host to IP
+                current_host = ip
+            except:
+                pass
+                
+        # Port information
+        elif '/tcp' in line or '/udp' in line:
+            try:
+                if '/tcp' in line:
+                    protocol = 'tcp'
+                    port_parts = line.split('/tcp')
+                else:
+                    protocol = 'udp'
+                    port_parts = line.split('/udp')
+                    
+                port_num = int(port_parts[0].strip())
+                port_info = port_parts[1].strip().split(' ', 1)
+                
+                state = port_info[0].strip()
+                service_info = {}
+                
+                if len(port_info) > 1:
+                    service_desc = port_info[1].strip()
+                    
+                    # Extract service details
+                    service_parts = service_desc.split(' ', 1)
+                    service_name = service_parts[0].strip()
+                    service_info['name'] = service_name
+                    
+                    if len(service_parts) > 1 and service_parts[1]:
+                        extra_info = service_parts[1].strip()
+                        if '(' in extra_info and ')' in extra_info:
+                            # Extract version info
+                            version_part = extra_info.split('(')[1].split(')')[0]
+                            service_info['product'] = version_part.split()[0]
+                            if len(version_part.split()) > 1:
+                                service_info['version'] = ' '.join(version_part.split()[1:])
+                        service_info['extrainfo'] = extra_info
+                
+                # Create port entry
+                port_entry = {
+                    'state': state,
+                    'reason': 'syn-ack',  # Default, since raw output often doesn't show reason
+                    'port': port_num,
+                    **service_info
+                }
+                
+                host_data[protocol][str(port_num)] = port_entry
+            except Exception as e:
+                logger.warning(f"Error parsing port line: {line} - {e}")
+    
+    # Add the last host
+    if current_host and host_data:
+        results[current_host] = host_data
+        
+    return results

@@ -1,0 +1,24 @@
+=== ReadonlyContext Info ===
+class ReadonlyContext:
+
+  def __init__(
+      self,
+      invocation_context: InvocationContext,
+  ) -> None:
+    self._invocation_context = invocation_context
+
+  @property
+  def invocation_id(self) -> str:
+    """The current invocation id."""
+    return self._invocation_context.invocation_id
+
+  @property
+  def agent_name(self) -> str:
+    """The name of the agent that is currently running."""
+    return self._invocation_context.agent.name
+
+  @property
+  def state(self) -> MappingProxyType[str, Any]:
+    """The state of the current session. READONLY field."""
+    return MappingProxyType(self._invocation_context.session.state)
+

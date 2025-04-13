@@ -1,0 +1,74 @@
+Help on class GoogleSearchTool in module google.adk.tools.google_search_tool:
+
+class GoogleSearchTool(google.adk.tools.base_tool.BaseTool)
+ |  A built-in tool that is automatically invoked by Gemini 2 models to retrieve search results from Google Search.
+ |
+ |  This tool operates internally within the model and does not require or perform
+ |  local code execution.
+ |
+ |  Method resolution order:
+ |      GoogleSearchTool
+ |      google.adk.tools.base_tool.BaseTool
+ |      abc.ABC
+ |      builtins.object
+ |
+ |  Methods defined here:
+ |
+ |  __init__(self)
+ |      Initialize self.  See help(type(self)) for accurate signature.
+ |
+ |  async process_llm_request(
+ |      self,
+ |      *,
+ |      tool_context: 'ToolContext',
+ |      llm_request: 'LlmRequest'
+ |  ) -> 'None'
+ |      Processes the outgoing LLM request for this tool.
+ |
+ |      Use cases:
+ |      - Most common use case is adding this tool to the LLM request.
+ |      - Some tools may just preprocess the LLM request before it's sent out.
+ |
+ |      Args:
+ |        tool_context: The context of the tool.
+ |        llm_request: The outgoing LLM request, mutable this method.
+ |
+ |  ----------------------------------------------------------------------
+ |  Data and other attributes defined here:
+ |
+ |  __abstractmethods__ = frozenset()
+ |
+ |  __annotations__ = {}
+ |
+ |  ----------------------------------------------------------------------
+ |  Methods inherited from google.adk.tools.base_tool.BaseTool:
+ |
+ |  async run_async(self, *, args: 'dict[str, Any]', tool_context: 'ToolContext') -> 'Any'
+ |      Runs the tool with the given arguments and context.
+ |
+ |      NOTE
+ |      - Required if this tool needs to run at the client side.
+ |      - Otherwise, can be skipped, e.g. for a built-in GoogleSearch tool for
+ |        Gemini.
+ |
+ |      Args:
+ |        args: The LLM-filled arguments.
+ |        ctx: The context of the tool.
+ |
+ |      Returns:
+ |        The result of running the tool.
+ |
+ |  ----------------------------------------------------------------------
+ |  Data descriptors inherited from google.adk.tools.base_tool.BaseTool:
+ |
+ |  __dict__
+ |      dictionary for instance variables
+ |
+ |  __weakref__
+ |      list of weak references to the object
+ |
+ |  ----------------------------------------------------------------------
+ |  Data and other attributes inherited from google.adk.tools.base_tool.BaseTool:
+ |
+ |  is_long_running = False
+
