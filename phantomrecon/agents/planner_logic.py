@@ -164,17 +164,71 @@ async def simple_create_attack_plan(**kwargs):
     # Extract scan data from session state if available
     scan_data = {}
     if context and hasattr(context, 'session') and hasattr(context.session, 'state'):
-        recon_data = context.session.state.get('recon', {})
-        if recon_data:
+        print(f"[PLANNER] State Keys: {list(context.session.state.keys())}")
+        
+        # Check for 'recon' key first
+        recon_data = context.session.state.get('recon', None)
+        if recon_data and isinstance(recon_data, dict):
+            print(f"[PLANNER] Found recon data in session state with keys: {list(recon_data.keys())}")
             scan_data = recon_data
-            print(f"[PLANNER] Found recon data in session state")
         else:
-            print(f"[PLANNER] No recon data found in session state")
-            # Check if we can get it from kwargs
-            if 'scan_data' in kwargs:
-                scan_data = kwargs['scan_data']
-                
-    # Call the actual implementation
-    return await create_attack_plan(scan_data, context)
+            print(f"[PLANNER] No valid recon data found in session state")
+            
+            # Try to look for individual recon components
+            nmap_results = context.session.state.get('nmap_scan_results', None)
+            dns_results = context.session.state.get('dns_recon_results', None)
+            web_results = context.session.state.get('web_search_results', None)
+            
+            if any([nmap_results, dns_results, web_results]):
+                print(f"[PLANNER] Found individual recon components, building composite data")
+                scan_data = {
+                    "nmap_scan": nmap_results if nmap_results else {},
+                    "dns_recon": dns_results if dns_results else {},
+                    "web_search": web_results if web_results else {}
+                }
+    else:
+        print(f"[PLANNER] No access to session state")
+        
+    # Check if we can get scan_data from kwargs
+    if not scan_data and 'scan_data' in kwargs:
+        scan_data = kwargs['scan_data']
+        print(f"[PLANNER] Using scan_data from kwargs")
+    
+    # Validate scan_data - ensure it's not empty and has required keys
+    if not scan_data:
+        error_msg = "No reconnaissance data found in session state or kwargs"
+        print(f"[PLANNER ERROR] {error_msg}")
+        return {"error": error_msg}
+    
+    # Print debug info about what we found
+    print(f"[PLANNER] Scan data keys: {list(scan_data.keys())}")
+    
+    # Look for key elements needed for planning
+    has_nmap = "nmap_scan" in scan_data and scan_data["nmap_scan"]
+    has_dns = "dns_recon" in scan_data and scan_data["dns_recon"]
+    has_targets = "target" in scan_data or has_nmap or has_dns
+    
+    if not has_targets:
+        error_msg = "Missing critical reconnaissance data (no target information found)"
+        print(f"[PLANNER ERROR] {error_msg}")
+        # Instead of returning error, proceed with empty data - the planner can decide if it's enough
+        print(f"[PLANNER] Attempting to plan with limited data anyway")
+    
+    # Call the actual implementation with more detailed logging
+    try:
+        print(f"[PLANNER] Calling create_attack_plan with data of size: {len(str(scan_data))}")
+        result = await create_attack_plan(scan_data, context)
+        print(f"[PLANNER] create_attack_plan result type: {type(result)}")
+        if isinstance(result, dict):
+            if "error" in result:
+                print(f"[PLANNER ERROR] Planning failed: {result['error']}")
+            else:
+                print(f"[PLANNER] Plan generated successfully with {len(result)} items")
+        return result
+    except Exception as e:
+        error_msg = f"Planning error: {str(e)}"
+        print(f"[PLANNER ERROR] {error_msg}")
+        logger.error(f"Error in simple_create_attack_plan: {e}", exc_info=True)
+        return {"error": error_msg}
 
 # Removed prioritize_targets function for simplicity in this refactor step. 
