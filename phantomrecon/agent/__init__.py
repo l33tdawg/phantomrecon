@@ -1,17 +1,12 @@
 #!/usr/bin/env python3
-# Apply monkey patch for session persistence FIRST before other imports
-from phantomrecon.session_fix import apply_monkey_patch
-# Apply the patch immediately to ensure all agent runs have persistence
-apply_monkey_patch()
-
-# Now import the rest
-import os
-from dotenv import load_dotenv
+# Direct import of ADK components
 from google.adk.agents import Agent, LlmAgent, SequentialAgent
 from google.adk.tools import FunctionTool
 import logging
 import json
+import os
 from typing import Optional, Dict, Any
+from dotenv import load_dotenv
 
 # Import logic functions using absolute paths
 from phantomrecon.agents.validation_logic import validate_attack_plan # Keep if needed later
@@ -121,23 +116,25 @@ recon_agent = LlmAgent(
     description="Performs parallel reconnaissance on the target from state['initial_target']."
 )
 
-# 3. Planner Agent
+# 3. Planner Agent with comprehensive instructions
 planner_agent = LlmAgent(
     name="PlannerAgent",
     model="gemini-1.5-flash-latest",
-    instruction="""You are an attack planner analyzing reconnaissance results. Your job is to:
-1. Examine the reconnaissance data in the session state under the 'recon' key
-2. Identify potential vulnerabilities and attack vectors based on the findings
-3. Generate a prioritized attack plan
-4. Use the simple_create_attack_plan tool to create a structured plan
-5. Be thorough and methodical in your analysis
+    instruction="""Your task is to analyze reconnaissance data and create an attack plan.
+1. First, explicitly mention what you're doing: "PlannerAgent is analyzing reconnaissance data..."
+2. **DO NOT ATTEMPT** to use Python functions like `locals()` or `print()` - these are not available to you.
+3. Instead, look at the reconnaissance data and analyze it directly. You do not need to print or debug anything.
+4. Create an attack plan by calling `simple_create_attack_plan()` - with NO parameters.
+5. After the plan is created, briefly report that planning is complete.
 
-IMPORTANT: ONLY use the simple_create_attack_plan tool provided to you. Do NOT attempt to use any built-in Python functions like 'locals', 'globals', or any other function not provided in your tools list. The simple_create_attack_plan tool will automatically access the session state.
-
-When calling the simple_create_attack_plan tool, don't provide any parameters - just call it as simple_create_attack_plan() without arguments.""",
-    tools=[simple_create_attack_plan_tool],
-    output_key="planning_results",
-    description="Analyzes recon data and generates an attack plan"
+IMPORTANT: DO NOT TRY TO DEBUG THE SYSTEM OR USE ANY PYTHON FUNCTIONS LIKE `locals()`, `print()`, etc. 
+They will cause errors if attempted. Just analyze the data you have access to.
+""",
+    tools=[
+        simple_create_attack_plan_tool,
+    ],
+    output_key="attack_plan", # Store the final plan
+    description="Analyzes reconnaissance data and creates an attack plan."
 )
 
 # 4. Exploit Router Agent

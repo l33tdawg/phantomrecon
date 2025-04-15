@@ -998,33 +998,65 @@ async def perform_parallel_recon(**kwargs) -> Dict[str, Any]:
     
     # Store results in session state if possible
     if context and hasattr(context, 'session') and hasattr(context.session, 'state'):
-        # Store all individual results in session state
-        if not isinstance(nmap_result, Exception):
-            context.session.state['nmap_scan_results'] = nmap_result
-            print(f"[STATE] Stored nmap_scan_results in session state")
-        
-        if not isinstance(dns_result, Exception):
-            context.session.state['dns_recon_results'] = dns_result
-            print(f"[STATE] Stored dns_recon_results in session state")
-        
-        if not isinstance(web_result, Exception):
-            context.session.state['web_search_results'] = web_result
-            print(f"[STATE] Stored web_search_results in session state")
-        
-        # Store web analysis results if available
-        if "web_analysis" in results and (not isinstance(results["web_analysis"], dict) or not results["web_analysis"].get("error")):
-            context.session.state['web_content_analysis'] = results["web_analysis"]
-            print(f"[STATE] Stored web_content_analysis in session state")
-        
-        # Store the combined results in 'recon'
-        context.session.state['recon'] = results
-        logger.debug("Stored combined recon results in session state.")
-        print("[INFO] Combined reconnaissance results stored in session state")
-        
-        # List all keys in session state for debugging
-        print(f"[STATE] Final state keys: {list(context.session.state.keys())}")
+        try:
+            # Store all individual results in session state
+            if not isinstance(nmap_result, Exception):
+                context.session.state['nmap_scan_results'] = nmap_result
+                print(f"[STATE] Stored nmap_scan_results in session state")
+            
+            if not isinstance(dns_result, Exception):
+                context.session.state['dns_recon_results'] = dns_result
+                print(f"[STATE] Stored dns_recon_results in session state")
+            
+            if not isinstance(web_result, Exception):
+                context.session.state['web_search_results'] = web_result
+                print(f"[STATE] Stored web_search_results in session state")
+            
+            # Store web analysis results if available
+            if "web_analysis" in results and (not isinstance(results["web_analysis"], dict) or not results["web_analysis"].get("error")):
+                context.session.state['web_content_analysis'] = results["web_analysis"]
+                print(f"[STATE] Stored web_content_analysis in session state")
+            
+            # Store the combined results in 'recon'
+            context.session.state['recon'] = results
+            logger.debug("Stored combined recon results in session state.")
+            print("[INFO] Combined reconnaissance results stored in session state")
+            
+            # List all keys in session state for debugging
+            print(f"[STATE] Final state keys: {list(context.session.state.keys())}")
+            print(f"[STATE] State type: {type(context.session.state)}")
+            
+            # Add extra validation to ensure data was actually stored
+            if 'recon' in context.session.state:
+                print(f"[VERIFY] Successfully verified 'recon' is in state")
+            else:
+                print(f"[VERIFY] 'recon' is NOT in state after attempted save!")
+                
+        except Exception as e:
+            print(f"[WARNING] Error storing in session state: {e}")
+            # Emergency file-based fallback
+            try:
+                import pickle
+                import os
+                cache_file = 'recon_cache.pkl'
+                with open(cache_file, 'wb') as f:
+                    pickle.dump(results, f)
+                print(f"[INFO] Saved recon results to emergency cache file: {cache_file}")
+            except Exception as e2:
+                print(f"[WARNING] Could not save to emergency cache file: {e2}")
     else:
         logger.warning("Could not access session state to store combined recon results.")
         print("[WARNING] Could not store reconnaissance results in session state")
+        
+        # Emergency file-based fallback even if session state fails
+        try:
+            import pickle
+            import os
+            cache_file = 'recon_cache.pkl'
+            with open(cache_file, 'wb') as f:
+                pickle.dump(results, f)
+            print(f"[INFO] Saved recon results to emergency cache file: {cache_file}")
+        except Exception as e:
+            print(f"[WARNING] Could not save to emergency cache file: {e}")
     
     return results
