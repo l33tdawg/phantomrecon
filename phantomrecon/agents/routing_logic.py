@@ -21,30 +21,74 @@ def decide_next_exploit(context: ToolContext, **kwargs: Any) -> Optional[str]:
                        or None to signify moving to the default next step (reporting).
     """
     logger.info("Routing exploits...")
-    attack_plan = context.session.state.get('attack_plan')
-    # Keep track of which exploits we've already attempted in this session
-    attempted_exploits = context.session.state.setdefault('attempted_exploits', set())
+    attack_plan = None
+    
+    # First try to get attack plan from context
+    if hasattr(context, 'session') and hasattr(context.session, 'state'):
+        attack_plan = context.session.state.get('attack_plan')
+    
+    # If no attack plan in context, try global cache
+    if not attack_plan:
+        try:
+            from google.adk.sessions.in_memory_session_service import _get_from_global_cache
+            attack_plan = _get_from_global_cache('attack_plan')
+            logger.info("Retrieved attack plan from global cache")
+        except (ImportError, Exception) as e:
+            logger.warning(f"Could not access global cache: {e}")
+            
+    # Still no attack plan? Try emergency file cache
+    if not attack_plan:
+        try:
+            import pickle
+            import os
+            cache_file = 'plan_cache.pkl'
+            if os.path.exists(cache_file):
+                with open(cache_file, 'rb') as f:
+                    attack_plan = pickle.load(f)
+                logger.info("Loaded attack plan from emergency cache file")
+        except Exception as e:
+            logger.warning(f"Could not load attack plan from cache file: {e}")
 
+    # If still no valid attack plan, return None
     if not isinstance(attack_plan, dict) or not attack_plan or attack_plan.get("error"):
-        logger.warning("No valid attack plan found in state. Skipping exploit phase.")
+        logger.warning("No valid attack plan found. Skipping exploit phase.")
         return None # Proceed to reporting
+
+    # Keep track of which exploits we've already attempted
+    attempted_exploits = set()
+    if hasattr(context, 'session') and hasattr(context.session, 'state'):
+        attempted_exploits = context.session.state.setdefault('attempted_exploits', set())
 
     # Check for Web exploits if not already attempted
     if 'Web Exploit Executor' not in attempted_exploits:
-        web_targets = {k: v for k, v in attack_plan.items() if k.startswith('web_')}
-        if web_targets:
+        # Check for any web-related entries in attack plan
+        has_web = False
+        for k, v in attack_plan.items():
+            if k == 'web' or k.startswith('web_') or k == 'subdomains':
+                has_web = True
+                break
+                
+        if has_web:
             logger.info("Routing to Web Exploit Executor.")
-            attempted_exploits.add('Web Exploit Executor')
-            context.session.state['attempted_exploits'] = attempted_exploits # Update state
+            if hasattr(context, 'session') and hasattr(context.session, 'state'):
+                attempted_exploits.add('Web Exploit Executor')
+                context.session.state['attempted_exploits'] = attempted_exploits # Update state
             return 'Web Exploit Executor' # Name must match the agent name in the main workflow
 
     # Check for SQL exploits if not already attempted
     if 'SQL Exploit Executor' not in attempted_exploits:
-        sql_targets = {k: v for k, v in attack_plan.items() if k.startswith('sql_')}
-        if sql_targets:
+        # Check for any SQL-related entries in attack plan
+        has_sql = False
+        for k, v in attack_plan.items():
+            if k == 'sql' or k.startswith('sql_') or k.startswith('database_'):
+                has_sql = True
+                break
+                
+        if has_sql:
             logger.info("Routing to SQL Exploit Executor.")
-            attempted_exploits.add('SQL Exploit Executor')
-            context.session.state['attempted_exploits'] = attempted_exploits # Update state
+            if hasattr(context, 'session') and hasattr(context.session, 'state'):
+                attempted_exploits.add('SQL Exploit Executor')
+                context.session.state['attempted_exploits'] = attempted_exploits # Update state
             return 'SQL Exploit Executor' # Name must match the agent name in the main workflow
             
     # Add checks for other exploit types (e.g., SSH) here...
@@ -64,7 +108,15 @@ def simple_decide_next_exploit(**kwargs):
     context = kwargs.get('context')
     
     if not context:
-        print("[ROUTER] No context provided, cannot determine next exploit")
-        return None
+        print("[ROUTER] Context not provided, using emergency cache mechanism")
+        # Create a minimal context-like object with required attributes
+        class MinimalContext:
+            pass
+            
+        minimal_context = MinimalContext()
+        minimal_context.session = MinimalContext()
+        minimal_context.session.state = {}
         
+        return decide_next_exploit(minimal_context)
+    
     return decide_next_exploit(context) 

@@ -6,6 +6,7 @@ from datetime import datetime
 import markdown2
 from rich.console import Console
 from google.adk.tools import ToolContext
+import logging
 
 console = Console()
 
@@ -705,119 +706,138 @@ def _build_markdown_report(recon_data: Dict, attack_plan: Dict, exploit_results:
 
 def generate_final_report(context: ToolContext) -> str:
     """
-    Generates the final Markdown and HTML reports based on data in session state.
-    Requires 'recon', 'attack_plan', and 'exploit_results' state.
-    Saves reports to the 'reports/' directory.
-
-    Args:
-        context (ToolContext): ADK ToolContext.
-
-    Returns:
-        str: Path to the generated Markdown report.
-    """
-    logger.info("Generating final report...")
-
-    # --- State Validation ---
-    recon_data = context.session.state.get('recon')
-    attack_plan = context.session.state.get('attack_plan')
-    exploit_results = context.session.state.get('exploit_results')
-
-    if not isinstance(recon_data, dict):
-        logger.error("State validation failed: 'recon' data missing or invalid.")
-        return "Error: Reconnaissance data missing or invalid."
-    if not isinstance(attack_plan, dict):
-        logger.error("State validation failed: 'attack_plan' missing or invalid.")
-        return "Error: Attack plan missing or invalid."
-    if not isinstance(exploit_results, list):
-        logger.warning("State validation failed: 'exploit_results' missing or invalid. Report will be incomplete.")
-        # Allow report generation even if exploits failed/were skipped
-        exploit_results = [] # Use empty list if invalid
-    # --- End State Validation ---
-
-    # --- Get Optional Summary --- 
-    summary_text = context.session.state.get('report_summary', "No summary generated.")
-    # --- End Optional Summary ---
-
-    output_dir = "reports"
-    os.makedirs(output_dir, exist_ok=True)
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    base_filename = f"phantomrecon_report_{timestamp}"
-    md_report_path = os.path.join(output_dir, f"{base_filename}.md")
-    html_report_path = os.path.join(output_dir, f"{base_filename}.html")
-
-    try:
-        # Build Markdown report content using the corrected standalone function
-        md_content = _build_markdown_report(recon_data, attack_plan, exploit_results, summary_text)
-
-        # Save Markdown report
-        with open(md_report_path, 'w') as f:
-            f.write(md_content)
-        logger.info(f"Markdown report saved to: {md_report_path}")
-
-        # Generate and save HTML report
-        _generate_html_report(md_content, html_report_path)
-        # logger.info(f"HTML report saved to: {html_report_path}") # Logged inside helper now
-
-        return md_report_path # Return path to the main markdown report
-
-    except IOError as e:
-        logger.error(f"Error writing report file: {str(e)}")
-        return f"Error saving report: {str(e)}"
-    except Exception as e:
-        logger.error(f"Unexpected error generating report: {e}", exc_info=True)
-        return f"Unexpected error generating report: {e}"
-
-# _generate_html_report helper function (ensure it exists and is correct)
-# It seems it was defined within the ReportAgent class previously, let's ensure it's available here
-def _generate_html_report(md_content: str, html_path: str):
-    """
-    Convert Markdown content to HTML report using markdown2 library.
+    Generate a final report based on all collected data in the session state.
     
     Args:
-        md_content (str): Markdown report content
-        html_path (str): Path to save the HTML file
+        context: Tool context for accessing session state
+        
+    Returns:
+        A Markdown report as a string
     """
+    logging.info("Generating final report...")
+    
+    # Initialize empty data
+    recon_data = {}
+    attack_plan = {}
+    exploit_results = []
+    
+    # First, try to get data from context
+    if hasattr(context, 'session') and hasattr(context.session, 'state'):
+        state = context.session.state
+        
+        # Extract reconnaissance data
+        if 'recon' in state:
+            recon_data = state['recon']
+        else:
+            # Try to get individual recon pieces
+            nmap_scan = state.get('nmap_scan_results', {})
+            dns_recon = state.get('dns_recon_results', {})
+            web_search = state.get('web_search_results', {})
+            web_analysis = state.get('web_content_analysis', {})
+            
+            if any([nmap_scan, dns_recon, web_search, web_analysis]):
+                recon_data = {
+                    "nmap_scan": nmap_scan,
+                    "dns_recon": dns_recon,
+                    "web_search": web_search,
+                    "web_analysis": web_analysis,
+                    "target": state.get('initial_target', "unknown")
+                }
+        
+        # Extract attack plan
+        if 'attack_plan' in state:
+            attack_plan = state['attack_plan']
+            
+        # Extract exploit results
+        if 'exploit_results' in state:
+            exploit_results = state['exploit_results']
+            if not isinstance(exploit_results, list):
+                exploit_results = [exploit_results]
+    
+    # If data is still missing, try global cache
+    if not recon_data or not attack_plan:
+        try:
+            from google.adk.sessions.in_memory_session_service import _get_from_global_cache
+            if not recon_data:
+                recon_data = _get_from_global_cache('recon')
+            if not attack_plan:
+                attack_plan = _get_from_global_cache('attack_plan')
+            logging.info("Retrieved data from global cache")
+        except (ImportError, Exception) as e:
+            logging.warning(f"Could not access global cache: {e}")
+    
+    # If still missing data, try emergency cache files
+    if not recon_data:
+        try:
+            import pickle
+            import os
+            cache_file = 'recon_cache.pkl'
+            if os.path.exists(cache_file):
+                with open(cache_file, 'rb') as f:
+                    recon_data = pickle.load(f)
+                logging.info("Loaded recon data from emergency cache file")
+        except Exception as e:
+            logging.warning(f"Could not load recon data from cache file: {e}")
+            
+    if not attack_plan:
+        try:
+            import pickle
+            import os
+            cache_file = 'plan_cache.pkl'
+            if os.path.exists(cache_file):
+                with open(cache_file, 'rb') as f:
+                    attack_plan = pickle.load(f)
+                logging.info("Loaded attack plan from emergency cache file")
+        except Exception as e:
+            logging.warning(f"Could not load attack plan from cache file: {e}")
+    
+    # Ensure we have minimal required data
+    if not recon_data:
+        recon_data = {
+            "target": getattr(context.session.state, 'initial_target', "unknown"),
+            "error": "No reconnaissance data available"
+        }
+    
+    if not attack_plan:
+        attack_plan = {
+            "error": "No attack plan available"
+        }
+    
+    # Generate the summary
+    target = recon_data.get('target', 'unknown')
+    summary_text = f"Security assessment for {target}"
+    
+    # Build the markdown report
+    report_content = _build_markdown_report(recon_data, attack_plan, exploit_results, summary_text)
+    
+    # Save the report to a file in reports/ directory
     try:
-        html_content = markdown2.markdown(md_content, extras=["tables", "fenced-code-blocks", "code-friendly"])
+        import os
+        import time
+        reports_dir = "reports"
+        os.makedirs(reports_dir, exist_ok=True)
         
-        # Basic HTML structure and styling
-        html_full = f"""
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <title>PhantomRecon Report</title>
-            <style>
-                body {{ font-family: sans-serif; line-height: 1.6; padding: 20px; max-width: 1000px; margin: auto; }}
-                h1, h2, h3 {{ color: #333; border-bottom: 1px solid #eee; padding-bottom: 5px; }}
-                h1 {{ font-size: 2em; }}
-                h2 {{ font-size: 1.5em; }}
-                h3 {{ font-size: 1.2em; }}
-                code {{ background-color: #f4f4f4; padding: 2px 4px; border-radius: 4px; font-family: monospace; }}
-                pre {{ background-color: #f4f4f4; padding: 10px; border-radius: 4px; overflow-x: auto; }}
-                table {{ border-collapse: collapse; width: 100%; margin-bottom: 1em; }}
-                th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left; }}
-                th {{ background-color: #f2f2f2; }}
-                li {{ margin-bottom: 0.5em; }}
-            </style>
-        </head>
-        <body>
-            {html_content}
-        </body>
-        </html>
-        """
+        # Generate timestamped filename
+        timestamp = time.strftime("%Y%m%d-%H%M%S")
+        target_name = recon_data.get('target', 'unknown').replace('.', '-')
+        report_filename = f"{reports_dir}/security-report-{target_name}-{timestamp}.md"
         
-        with open(html_path, 'w') as f:
-            f.write(html_full)
-        # logger.info(f"HTML report saved to: {html_path}") # Logged by caller
-        console.print(f"[blue]HTML report saved to: {html_path}[/blue]")
+        with open(report_filename, 'w') as f:
+            f.write(report_content)
+        
+        logging.info(f"Report saved to {report_filename}")
+        
+        # Try to generate HTML version
+        html_path = report_filename.replace('.md', '.html')
+        _generate_html_report(report_content, html_path)
     except Exception as e:
-        # Re-raise or handle more gracefully if needed, here we just log
-        logger.error(f"Error in _generate_html_report: {str(e)}", exc_info=True)
-        raise # Re-raise to be caught by the caller
-
-# _generate_html_report helper can remain the same if needed, but call it from generate_final_report
-# def _generate_html_report(md_content: str, html_path: str):
-#    ... 
+        logging.error(f"Failed to save report: {e}")
+    
+    # If context has session state, store the final report
+    if hasattr(context, 'session') and hasattr(context.session, 'state'):
+        context.session.state['final_report'] = report_content
+    
+    return report_content
 
 def simple_generate_final_report(**kwargs):
     """
@@ -830,7 +850,15 @@ def simple_generate_final_report(**kwargs):
     context = kwargs.get('context')
     
     if not context:
-        print("[REPORT] No context provided, cannot generate report")
-        return {"error": "No context provided for report generation"}
+        print("[REPORT] Context not provided, using emergency cache mechanism")
+        # Create a minimal context-like object with required attributes
+        class MinimalContext:
+            pass
+            
+        minimal_context = MinimalContext()
+        minimal_context.session = MinimalContext()
+        minimal_context.session.state = {}
+        
+        return generate_final_report(minimal_context)
         
     return generate_final_report(context) 
