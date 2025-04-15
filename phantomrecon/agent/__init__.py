@@ -132,7 +132,9 @@ planner_agent = LlmAgent(
 4. Use the simple_create_attack_plan tool to create a structured plan
 5. Be thorough and methodical in your analysis
 
-When calling the simple_create_attack_plan tool, you don't need to provide any parameters - it will automatically access the session state.""",
+IMPORTANT: ONLY use the simple_create_attack_plan tool provided to you. Do NOT attempt to use any built-in Python functions like 'locals', 'globals', or any other function not provided in your tools list. The simple_create_attack_plan tool will automatically access the session state.
+
+When calling the simple_create_attack_plan tool, don't provide any parameters - just call it as simple_create_attack_plan() without arguments.""",
     tools=[simple_create_attack_plan_tool],
     output_key="planning_results",
     description="Analyzes recon data and generates an attack plan"

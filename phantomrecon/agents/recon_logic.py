@@ -52,10 +52,9 @@ async def perform_nmap_scan(**kwargs) -> Dict[str, Any]:
     """
     Performs an Nmap scan on the target and returns structured results.
     Uses data from the session state 'initial_target' for scan target.
-    Stores results in session state 'nmap_scan_results'.
     
     Returns:
-        Dict[str, Any]: Scan results (also stored in state['nmap_scan_results']).
+        Dict[str, Any]: Scan results.
     """
     # Extract context from kwargs
     context = kwargs.get('context')
@@ -85,9 +84,6 @@ async def perform_nmap_scan(**kwargs) -> Dict[str, Any]:
             "error": error_msg,
             "scan": {}
         }
-        # Store result in session state if possible
-        if context and hasattr(context, 'session') and hasattr(context.session, 'state'):
-            context.session.state['nmap_scan_results'] = results
         return results
     
     logger.info(f"Starting Nmap scan for target: {target}")
@@ -129,16 +125,9 @@ async def perform_nmap_scan(**kwargs) -> Dict[str, Any]:
             "scan": scan_results,
             "command": command_str
         }
-    
-    # Store result in session state if possible
-    if context and hasattr(context, 'session') and hasattr(context.session, 'state'):
-        context.session.state['nmap_scan_results'] = results
-        logger.debug("Stored nmap_scan_results in session state.")
-        print(f"[NMAP] Results stored in session state")
-    else:
-        logger.warning("Could not access session state to store Nmap scan results.")
-        print(f"[NMAP] Warning: Could not store results in session state")
         
+    # Remove state-saving logic and just return results
+    print(f"[NMAP] Scan completed, returning results")
     return results
 
 # Note: analyze_vulnerabilities logic is removed from here.
@@ -151,7 +140,7 @@ async def perform_dns_recon(**kwargs) -> Dict[str, Any]:
     Performs DNS reconnaissance on target from state using ADK's command execution.
     
     Returns:
-        Dict[str, Any]: DNS recon results (also stored in state['dns_recon_results']).
+        Dict[str, Any]: DNS recon results.
     """
     # Extract context from kwargs
     context = kwargs.get('context')
@@ -183,9 +172,6 @@ async def perform_dns_recon(**kwargs) -> Dict[str, Any]:
             "subdomains": [],
             "ip_addresses": []
         }
-        # Store result in session state if possible
-        if context and hasattr(context, 'session') and hasattr(context.session, 'state'):
-            context.session.state['dns_recon_results'] = results
         return results
     
     logger.info(f"Starting DNS recon for target: {target}")
@@ -272,15 +258,8 @@ async def perform_dns_recon(**kwargs) -> Dict[str, Any]:
         await _find_subdomains(target, results)
         print(f"[DNS] Found {len(results.get('subdomains', []))} subdomains")
     
-    # Store results in session state
-    if context and hasattr(context, 'session') and hasattr(context.session, 'state'):
-        context.session.state['dns_recon_results'] = results
-        logger.debug("Stored dns_recon_results in session state.")
-        print(f"[DNS] Results stored in session state")
-    else:
-        logger.warning("Could not access session state to store DNS recon results.")
-        print(f"[DNS] Warning: Could not store results in session state")
-    
+    # Remove state-saving logic and just return results
+    print(f"[DNS] Reconnaissance completed, returning results")
     return results
 
 async def _find_subdomains(target: str, results: Dict[str, Any], max_subdomains: int = 10) -> None:
@@ -341,10 +320,9 @@ async def _run_command_detailed_async(command: str, timeout: int = 15) -> Tuple[
 async def perform_web_search(**kwargs) -> Dict[str, Any]:
     """
     Performs a search for the target using patterns since Google Search Tool is not reliable.
-    Stores results in session state.
     
     Returns:
-        Dict[str, Any]: Search results (also stored in state['web_search_results']).
+        Dict[str, Any]: Search results.
     """
     # Extract context from kwargs
     context = kwargs.get('context')
@@ -376,9 +354,6 @@ async def perform_web_search(**kwargs) -> Dict[str, Any]:
             "results": [],
             "status": "error"
         }
-        # Store result in session state if possible
-        if context and hasattr(context, 'session') and hasattr(context.session, 'state'):
-            context.session.state['web_search_results'] = results
         return results
     
     logger.info(f"Starting web search for target: {target}")
@@ -417,15 +392,8 @@ async def perform_web_search(**kwargs) -> Dict[str, Any]:
         "status": "completed"
     }
 
-    # Store result in session state if possible
-    if context and hasattr(context, 'session') and hasattr(context.session, 'state'):
-        context.session.state['web_search_results'] = results
-        logger.debug("Stored web_search_results in session state.")
-        print(f"[WEB] Search results stored in session state")
-    else:
-        logger.warning("Could not access session state to store web search results.")
-        print(f"[WEB] Warning: Could not store search results in session state")
-
+    # Remove state-saving logic and just return results
+    print(f"[WEB] Search completed, returning results")
     logger.info(f"Generated {len(search_results)} URLs for analysis")
     return results
 
@@ -433,10 +401,9 @@ async def perform_web_search(**kwargs) -> Dict[str, Any]:
 async def analyze_web_content(**kwargs) -> Dict[str, Any]:
     """
     Analyzes web content from URLs found in web search results.
-    Stored in session state.
     
     Returns:
-        Dict[str, Any]: Analysis results (also stored in state['web_content_analysis']).
+        Dict[str, Any]: Analysis results.
     """
     # Extract context from kwargs
     context = kwargs.get('context')
@@ -455,7 +422,12 @@ async def analyze_web_content(**kwargs) -> Dict[str, Any]:
     
     # Get search results from session state, if available
     search_results = None
-    if context and hasattr(context, 'session') and hasattr(context.session, 'state'):
+    # First check if we were provided web_result directly in kwargs (from parallel recon)
+    if 'web_result' in kwargs and isinstance(kwargs['web_result'], dict):
+        print(f"[ANALYSIS] Using web search results provided directly in kwargs")
+        search_results = kwargs['web_result']
+    # Otherwise try to get it from session state
+    elif context and hasattr(context, 'session') and hasattr(context.session, 'state'):
         search_results = context.session.state.get('web_search_results', {})
     
     print(f"[ANALYSIS] Starting web content analysis...")
@@ -474,10 +446,6 @@ async def analyze_web_content(**kwargs) -> Dict[str, Any]:
         print(f"[ANALYSIS] Error: No valid web search results found")
         analysis_results["error"] = "No valid web search results found in state"
         
-        # Still try to store this error in state
-        if context and hasattr(context, 'session') and hasattr(context.session, 'state'):
-            context.session.state['web_content_analysis'] = analysis_results
-        
         return analysis_results
     
     # Extract URLs from search results
@@ -486,10 +454,6 @@ async def analyze_web_content(**kwargs) -> Dict[str, Any]:
         logger.warning("No URLs found in web search results for analysis")
         print(f"[ANALYSIS] Error: No URLs found in web search results")
         analysis_results["error"] = "No URLs found in web search results"
-        
-        # Still try to store this error in state
-        if context and hasattr(context, 'session') and hasattr(context.session, 'state'):
-            context.session.state['web_content_analysis'] = analysis_results
         
         return analysis_results
     
@@ -539,15 +503,8 @@ async def analyze_web_content(**kwargs) -> Dict[str, Any]:
     if analysis_results["urls_analyzed"] > 0:
         analysis_results["status"] = "completed"
     
-    # Store results in session state
-    if context and hasattr(context, 'session') and hasattr(context.session, 'state'):
-        context.session.state['web_content_analysis'] = analysis_results
-        logger.debug("Stored web_content_analysis in session state.")
-        print(f"[ANALYSIS] Analysis results stored in session state")
-    else:
-        logger.warning("Could not access session state to store web content analysis.")
-        print(f"[ANALYSIS] Warning: Could not store analysis results in session state")
-    
+    # Remove state-saving logic and just return results
+    print(f"[ANALYSIS] Analysis completed, returning results")
     return analysis_results
 
 async def _analyze_single_url(session, url):
@@ -1015,7 +972,10 @@ async def perform_parallel_recon(**kwargs) -> Dict[str, Any]:
         # Pass context to analyze_web_content
         try:
             print("[INFO] Starting web content analysis...")
-            web_analysis = await analyze_web_content(**modified_kwargs)
+            # Create a new kwargs with the web_result directly included
+            web_analysis_kwargs = modified_kwargs.copy()
+            web_analysis_kwargs['web_result'] = web_result
+            web_analysis = await analyze_web_content(**web_analysis_kwargs)
             print("[SUCCESS] Web content analysis completed successfully")
             results["web_analysis"] = web_analysis
         except Exception as e:
@@ -1038,9 +998,28 @@ async def perform_parallel_recon(**kwargs) -> Dict[str, Any]:
     
     # Store results in session state if possible
     if context and hasattr(context, 'session') and hasattr(context.session, 'state'):
+        # Store all individual results in session state
+        if not isinstance(nmap_result, Exception):
+            context.session.state['nmap_scan_results'] = nmap_result
+            print(f"[STATE] Stored nmap_scan_results in session state")
+        
+        if not isinstance(dns_result, Exception):
+            context.session.state['dns_recon_results'] = dns_result
+            print(f"[STATE] Stored dns_recon_results in session state")
+        
+        if not isinstance(web_result, Exception):
+            context.session.state['web_search_results'] = web_result
+            print(f"[STATE] Stored web_search_results in session state")
+        
+        # Store web analysis results if available
+        if "web_analysis" in results and (not isinstance(results["web_analysis"], dict) or not results["web_analysis"].get("error")):
+            context.session.state['web_content_analysis'] = results["web_analysis"]
+            print(f"[STATE] Stored web_content_analysis in session state")
+        
+        # Store the combined results in 'recon'
         context.session.state['recon'] = results
         logger.debug("Stored combined recon results in session state.")
-        print("[INFO] Reconnaissance results stored in session state")
+        print("[INFO] Combined reconnaissance results stored in session state")
         
         # List all keys in session state for debugging
         print(f"[STATE] Final state keys: {list(context.session.state.keys())}")
