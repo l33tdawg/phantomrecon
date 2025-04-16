@@ -130,6 +130,7 @@ cython_debug/
 
 # Project specific files
 current-progress.md
+multi-domain-enhancement-plan.md
 prd.md
 *.txt
 reports/*

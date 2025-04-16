@@ -348,20 +348,25 @@ class ReportAgent:
         try:
             html_content = markdown2.markdown(md_content, extras=["tables", "fenced-code-blocks"])
             
-            # Optional: Add basic styling
+            # Add basic styling
             html_full = f"""
             <!DOCTYPE html>
             <html>
             <head>
                 <title>PhantomRecon Report</title>
                 <style>
-                    body {{ font-family: sans-serif; line-height: 1.6; padding: 20px; }}
+                    body {{ font-family: sans-serif; line-height: 1.6; padding: 20px; max-width: 1200px; margin: 0 auto; }}
                     h1, h2, h3 {{ color: #333; }}
                     code {{ background-color: #f4f4f4; padding: 2px 4px; border-radius: 4px; }}
                     pre {{ background-color: #f4f4f4; padding: 10px; border-radius: 4px; overflow-x: auto; }}
-                    table {{ border-collapse: collapse; width: 100%; }}
+                    table {{ border-collapse: collapse; width: 100%; margin-bottom: 20px; }}
                     th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left; }}
                     th {{ background-color: #f2f2f2; }}
+                    .severity-high {{ color: #d9534f; font-weight: bold; }}
+                    .severity-medium {{ color: #f0ad4e; font-weight: bold; }}
+                    .severity-low {{ color: #5bc0de; }}
+                    .status-vulnerable {{ color: #d9534f; font-weight: bold; }}
+                    .status-completed {{ color: #5cb85c; }}
                 </style>
             </head>
             <body>
@@ -373,8 +378,10 @@ class ReportAgent:
             with open(html_path, 'w') as f:
                 f.write(html_full)
             console.print(f"[green]HTML report saved to: {html_path}[/green]")
+            return {"status": "success", "path": html_path}
         except Exception as e:
-            console.print(f"[red]Error generating HTML report: {str(e)}[/red]")
+            print(f"[REPORT] Error generating HTML report: {str(e)}")
+            return {"status": "error", "message": str(e)}
 
 def _build_markdown_report(recon_data: Dict, attack_plan: Dict, exploit_results: List[Dict], summary_text: str) -> str:
     """
@@ -902,16 +909,72 @@ def simple_generate_final_report(**kwargs):
     context = kwargs.get('context')
     
     if not context:
-        print("[REPORT] Context not provided, using emergency cache mechanism")
-        # Create a minimal context-like object with required attributes
-        class MinimalContext:
-            pass
+        print("[REPORT] Context not provided, creating synthetic context with global state")
+        try:
+            # Import from ADK's in-memory session for global cache access
+            from google.adk.sessions.in_memory_session_service import _get_from_global_cache
+            from google.adk.tools import ToolContext
+            from google.adk.sessions import Session
             
-        minimal_context = MinimalContext()
-        minimal_context.session = MinimalContext()
-        minimal_context.session.state = {}
-        
-        return generate_final_report(minimal_context)
+            # Create a synthetic context with a session
+            context = ToolContext()
+            context.session = Session()
+            
+            # Initialize state dictionary
+            context.session.state = {}
+            
+            # Try to load critical data from global cache
+            attack_plan = _get_from_global_cache('attack_plan')
+            if attack_plan:
+                context.session.state['attack_plan'] = attack_plan
+                print(f"[REPORT] Loaded attack_plan from global cache")
+            
+            recon = _get_from_global_cache('recon')
+            if recon:
+                context.session.state['recon'] = recon
+                print(f"[REPORT] Loaded recon from global cache")
+                
+            initial_target = _get_from_global_cache('initial_target')
+            if initial_target:
+                context.session.state['initial_target'] = initial_target
+                print(f"[REPORT] Loaded initial_target from global cache: {initial_target}")
+                
+            # Load exploit results which are critical for reporting
+            exploit_results = _get_from_global_cache('exploit_results')
+            if exploit_results:
+                context.session.state['exploit_results'] = exploit_results
+                print(f"[REPORT] Loaded exploit_results from global cache")
+            
+            # If state is still empty, try emergency file cache
+            if not context.session.state:
+                try:
+                    import pickle
+                    import os
+                    
+                    # Try to load attack plan
+                    if os.path.exists('plan_cache.pkl'):
+                        with open('plan_cache.pkl', 'rb') as f:
+                            context.session.state['attack_plan'] = pickle.load(f)
+                            print(f"[REPORT] Loaded attack_plan from emergency file cache")
+                    
+                    # Try to load recon data
+                    if os.path.exists('recon_cache.pkl'):
+                        with open('recon_cache.pkl', 'rb') as f:
+                            context.session.state['recon'] = pickle.load(f)
+                            print(f"[REPORT] Loaded recon from emergency file cache")
+                except Exception as e:
+                    print(f"[REPORT] Error loading from emergency cache: {e}")
+            
+            print(f"[REPORT] Created synthetic context with keys: {list(context.session.state.keys())}")
+            
+        except Exception as e:
+            print(f"[REPORT] Error creating synthetic context: {e}")
+            # Fall back to empty context if all else fails
+            context = ToolContext()
+            context.session = Session()
+            context.session.state = {}
+    else:
+        print(f"[REPORT] Using provided context with state keys: {list(context.session.state.keys()) if hasattr(context, 'session') and hasattr(context.session, 'state') else 'No state'}")
         
     return generate_final_report(context)
 
@@ -1022,3 +1085,49 @@ def generate_vulnerability_profile(attack_plan: Dict[str, Any], nmap_results: Di
         markdown += f"| {vuln['service']} | {vuln['name']} | {vuln['severity']} | {exploited} | {vuln['description']} |\n"
     
     return markdown 
+
+def _generate_html_report(md_content: str, html_path: str):
+    """
+    Convert Markdown content to HTML report.
+    
+    Args:
+        md_content (str): Markdown report content
+        html_path (str): Path to save the HTML file
+    """
+    try:
+        html_content = markdown2.markdown(md_content, extras=["tables", "fenced-code-blocks"])
+        
+        # Add basic styling
+        html_full = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>PhantomRecon Report</title>
+            <style>
+                body {{ font-family: sans-serif; line-height: 1.6; padding: 20px; max-width: 1200px; margin: 0 auto; }}
+                h1, h2, h3 {{ color: #333; }}
+                code {{ background-color: #f4f4f4; padding: 2px 4px; border-radius: 4px; }}
+                pre {{ background-color: #f4f4f4; padding: 10px; border-radius: 4px; overflow-x: auto; }}
+                table {{ border-collapse: collapse; width: 100%; margin-bottom: 20px; }}
+                th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left; }}
+                th {{ background-color: #f2f2f2; }}
+                .severity-high {{ color: #d9534f; font-weight: bold; }}
+                .severity-medium {{ color: #f0ad4e; font-weight: bold; }}
+                .severity-low {{ color: #5bc0de; }}
+                .status-vulnerable {{ color: #d9534f; font-weight: bold; }}
+                .status-completed {{ color: #5cb85c; }}
+            </style>
+        </head>
+        <body>
+            {html_content}
+        </body>
+        </html>
+        """
+        
+        with open(html_path, 'w') as f:
+            f.write(html_full)
+        print(f"[REPORT] HTML report saved to: {html_path}")
+        return {"status": "success", "path": html_path}
+    except Exception as e:
+        print(f"[REPORT] Error generating HTML report: {str(e)}")
+        return {"status": "error", "message": str(e)} 
