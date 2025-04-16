@@ -177,6 +177,11 @@ class ReportAgent:
         if exploit_results:
             report.append("### Test Outcomes:")
             for result in exploit_results:
+                # Check if result is a dictionary before trying to access its properties
+                if not isinstance(result, dict):
+                    report.append(f"- **Invalid Result:** `{result}`")
+                    continue
+                
                 test_name = result.get('test', 'N/A')
                 target_id = result.get('target', 'N/A')
                 base_url = result.get('url') # Get base URL if available (added in scanners)
@@ -193,137 +198,140 @@ class ReportAgent:
                     # --- Specific Formatting for Scanners ---
                     if test_name == 'wapiti_scan':
                         for finding in findings_list:
-                             if isinstance(finding, dict):
-                                  report.append(f"    - **Category:** `{finding.get('category', 'N/A')}` (Level: `{finding.get('level', 'N/A')}`)")
-                                  report.append(f"      - Message: {finding.get('message', 'N/A')}")
-                                  if finding.get('parameter'):
-                                       report.append(f"      - Parameter: `{finding.get('parameter')}` (Method: `{finding.get('method', 'N/A')}`)")
-                                       # Optionally add curl command or details if needed
-                                       # report.append(f"        - Details: `{finding.get('detail', {})}`") 
-                             else:
-                                  report.append(f"    - (Non-dict finding: {finding})")
-                                  
+                            if isinstance(finding, dict):
+                                report.append(f"    - **Category:** `{finding.get('category', 'N/A')}` (Level: `{finding.get('level', 'N/A')}`)")
+                                # Use message field first, fallback to description if message doesn't exist
+                                description = finding.get('message', finding.get('description', 'N/A'))
+                                report.append(f"      - Description: {description}")
+                                if finding.get('parameter'):
+                                    report.append(f"      - Parameter: `{finding.get('parameter')}` (Method: `{finding.get('method', 'N/A')}`)")
+                                    report.append(f"      - Reference: {finding.get('reference', 'N/A')}")
+                                # Optionally add curl command or details if needed
+                                # report.append(f"        - Details: `{finding.get('detail', {})}`") 
+                            else:
+                                report.append(f"    - (Non-dict finding: {finding})")
+                                
                     elif test_name == 'wpscan_scan':
                         for finding in findings_list:
-                             if isinstance(finding, dict):
-                                 finding_type = finding.get('type', 'N/A')
-                                 if finding_type == 'info':
-                                      report.append(f"    - **Info:** {finding.get('message', 'N/A')}")
-                                 elif finding_type == 'wpscan_vulnerability':
-                                      report.append(f"    - **Vulnerability:** `{finding.get('title', 'N/A')}`")
-                                      report.append(f"      - Source: `{finding.get('source_type', 'N/A')}` (`{finding.get('source_name', 'N/A')}`)")
-                                      if finding.get('fixed_in'):
-                                           report.append(f"      - Fixed In: `{finding.get('fixed_in')}`")
-                                      # Optionally add references
-                                      refs = finding.get('references', {})
-                                      if refs:
-                                           report.append("      - References:")
-                                           for ref_type, ref_list in refs.items():
-                                               if isinstance(ref_list, list):
-                                                   for ref_item in ref_list:
-                                                        report.append(f"        - {ref_type.upper()}: {ref_item}")
-                                               elif isinstance(ref_list, str): # Handle single string ref
-                                                    report.append(f"        - {ref_type.upper()}: {ref_list}")
-                                 elif finding_type == 'wpscan_interesting':
-                                      report.append(f"    - **Interesting Finding:** {finding.get('message', 'N/A')}")
-                                      report.append(f"      - Confidence: {finding.get('confidence', 'N/A')}%")
-                                 else:
-                                      # Generic fallback for other WPScan finding types
-                                      report.append(f"    - Type: `{finding_type}`")
-                                      report.append(f"      - Message: {finding.get('message', finding.get('to_s', 'N/A'))}")
-                             else:
-                                 report.append(f"    - (Non-dict finding: {finding})")
-                                 
+                            if isinstance(finding, dict):
+                                finding_type = finding.get('type', 'N/A')
+                                if finding_type == 'info':
+                                    report.append(f"    - **Info:** {finding.get('message', 'N/A')}")
+                                elif finding_type == 'wpscan_vulnerability':
+                                    report.append(f"    - **Vulnerability:** `{finding.get('title', 'N/A')}`")
+                                    report.append(f"      - Source: `{finding.get('source_type', 'N/A')}` (`{finding.get('source_name', 'N/A')}`)")
+                                    if finding.get('fixed_in'):
+                                        report.append(f"      - Fixed In: `{finding.get('fixed_in')}`")
+                                    # Optionally add references
+                                    refs = finding.get('references', {})
+                                    if refs:
+                                        report.append("      - References:")
+                                        for ref_type, ref_list in refs.items():
+                                            if isinstance(ref_list, list):
+                                                for ref_item in ref_list:
+                                                    report.append(f"        - {ref_type.upper()}: {ref_item}")
+                                            elif isinstance(ref_list, str): # Handle single string ref
+                                                report.append(f"        - {ref_type.upper()}: {ref_list}")
+                                elif finding_type == 'wpscan_interesting':
+                                    report.append(f"    - **Interesting Finding:** {finding.get('message', 'N/A')}")
+                                    report.append(f"      - Confidence: {finding.get('confidence', 'N/A')}%")
+                                else:
+                                    # Generic fallback for other WPScan finding types
+                                    report.append(f"    - Type: `{finding_type}`")
+                                    report.append(f"      - Message: {finding.get('message', finding.get('to_s', 'N/A'))}")
+                            else:
+                                report.append(f"    - (Non-dict finding: {finding})")
+                                
                     # --- Generic Formatting for Other Tests ---    
                     else:
                         for finding in findings_list:
                             if isinstance(finding, dict):
-                                 # Specific formatting for SQL version vulns (searchsploit)
-                                 if test_name == 'version_vulnerabilities' and finding.get('type') == 'exploitdb_finding':
-                                      report.append(f"    - **ExploitDB:** `{finding.get('title', 'N/A')}`")
-                                      report.append(f"      - EDB-ID: `{finding.get('edb_id', 'N/A')}` (Path: `{finding.get('path', 'N/A')}`")
-                                      report.append(f"      - Platform: `{finding.get('platform', 'N/A')}` (Type: `{finding.get('exploit_type', 'N/A')}`")
+                                # Specific formatting for SQL version vulns (searchsploit)
+                                if test_name == 'version_vulnerabilities' and finding.get('type') == 'exploitdb_finding':
+                                    report.append(f"    - **ExploitDB:** `{finding.get('title', 'N/A')}`")
+                                    report.append(f"      - EDB-ID: `{finding.get('edb_id', 'N/A')}` (Path: `{finding.get('path', 'N/A')}`")
+                                    report.append(f"      - Platform: `{finding.get('platform', 'N/A')}` (Type: `{finding.get('exploit_type', 'N/A')}`")
+                                
+                                # Specific formatting for SQL default creds
+                                elif test_name == 'default_credentials' and finding.get('user') is not None:
+                                    report.append(f"    - **Successful Login:** User=`{finding.get('user')}` Password=`{finding.get('password')}`")
                                   
-                                 # Specific formatting for SQL default creds
-                                 elif test_name == 'default_credentials' and finding.get('user') is not None:
-                                      report.append(f"    - **Successful Login:** User=`{finding.get('user')}` Password=`{finding.get('password')}`")
+                                # Specific formatting for SQL sqlmap direct exploit
+                                elif test_name == 'sqlmap_direct_exploit' and isinstance(finding, dict):
+                                    report.append(f"    - **Sqlmap Direct Connect Results:** (User: `{result.get('auth_used',{}).get('user')}`)\") # Fixed quotes and parenthesis")
+                                    if finding.get('current_user'):
+                                        report.append(f"      - Current User: `{finding.get('current_user')}`\") # Fixed quotes")
+                                    if finding.get('current_db'):
+                                        report.append(f"      - Current DB: `{finding.get('current_db')}`\") # Fixed quotes")
+                                    if finding.get('is_dba') is not None:
+                                        report.append(f"      - Is DBA: `{finding.get('is_dba')}`\") # Fixed quotes")
+                                    if finding.get('databases'): # Note: sqlmap stdout parsing might only get count now
+                                        report.append(f"      - Databases Found: `{finding.get('databases')}` (or count: `{finding.get('databases_count')}`)\") # Fixed quotes and parenthesis")
+                                    if finding.get('errors'):
+                                        # Properly format the f-string expression for joining the list
+                                        errors_str = ", ".join(finding.get('errors', []))
+                                        report.append(f"    - **Enumeration Errors:** `{errors_str}`")
                                   
-                                 # Specific formatting for SQL sqlmap direct exploit
-                                 elif test_name == 'sqlmap_direct_exploit' and isinstance(finding, dict):
-                                      report.append(f"    - **Sqlmap Direct Connect Results:** (User: `{result.get('auth_used',{}).get('user')}`)\") # Fixed quotes and parenthesis")
-                                      if finding.get('current_user'):
-                                           report.append(f"      - Current User: `{finding.get('current_user')}`\") # Fixed quotes")
-                                      if finding.get('current_db'):
-                                           report.append(f"      - Current DB: `{finding.get('current_db')}`\") # Fixed quotes")
-                                      if finding.get('is_dba') is not None:
-                                           report.append(f"      - Is DBA: `{finding.get('is_dba')}`\") # Fixed quotes")
-                                      if finding.get('databases'): # Note: sqlmap stdout parsing might only get count now
-                                           report.append(f"      - Databases Found: `{finding.get('databases')}` (or count: `{finding.get('databases_count')}`)\") # Fixed quotes and parenthesis")
-                                      if finding.get('errors'):
-                                           # Properly format the f-string expression for joining the list
-                                           errors_str = ", ".join(finding.get('errors', []))
-                                           report.append(f"    - **Enumeration Errors:** `{errors_str}`")
-                                  
-                                 # Default generic format
-                                 else:
-                                     # Specific formatting for SSH weak creds
-                                     if test_name == 'weak_credentials' and finding.get('user') is not None:
-                                          report.append(f"    - **Successful Login:** User=`{finding.get('user')}` Password=`{finding.get('password')}`")
-                                     # Specific formatting for SSH Audit (extract key info)
-                                     elif test_name == 'ssh_config_audit' and isinstance(finding, dict):
-                                          report.append(f"    - **SSH Audit Findings:**")
-                                          if finding.get('banner'):
-                                               report.append(f"      - Banner: `{finding.get('banner')}`")
-                                          
-                                          # Report weak algorithms
-                                          if finding.get('weak_algorithms'):
-                                              report.append(f"      - **Weak Algorithms Detected:**")
-                                              for algo in finding['weak_algorithms']:
-                                                   report.append(f"        - **Category:** `{algo.get('category').upper()}` Name: `{algo.get('name')}` ({algo.get('classification')})")
-                                                   if algo.get('recommendations'):
-                                                       report.append(f"          - Recommendation: {'; '.join(algo['recommendations'])}")
-                                          else:
-                                               report.append(f"      - Weak Algorithms: None found.")
-                                          
-                                          # Report recommendations (warnings/failures)
-                                          if finding.get('recommendations'):
-                                              report.append(f"      - **Security Recommendations:**")
-                                              for rec in finding['recommendations']:
-                                                   report.append(f"        - **Severity:** `{rec.get('severity').upper()}` Message: {rec.get('message')}")
-                                          else:
-                                               report.append(f"      - Security Recommendations: None found.")
+                                # Default generic format
+                                else:
+                                    # Specific formatting for SSH weak creds
+                                    if test_name == 'weak_credentials' and finding.get('user') is not None:
+                                        report.append(f"    - **Successful Login:** User=`{finding.get('user')}` Password=`{finding.get('password')}`")
+                                    # Specific formatting for SSH Audit (extract key info)
+                                    elif test_name == 'ssh_config_audit' and isinstance(finding, dict):
+                                        report.append(f"    - **SSH Audit Findings:**")
+                                        if finding.get('banner'):
+                                            report.append(f"      - Banner: `{finding.get('banner')}`")
+                                        
+                                        # Report weak algorithms
+                                        if finding.get('weak_algorithms'):
+                                            report.append(f"      - **Weak Algorithms Detected:**")
+                                            for algo in finding['weak_algorithms']:
+                                                report.append(f"        - **Category:** `{algo.get('category').upper()}` Name: `{algo.get('name')}` ({algo.get('classification')})")
+                                                if algo.get('recommendations'):
+                                                    report.append(f"          - Recommendation: {'; '.join(algo['recommendations'])}")
+                                        else:
+                                            report.append(f"      - Weak Algorithms: None found.")
+                                        
+                                        # Report recommendations (warnings/failures)
+                                        if finding.get('recommendations'):
+                                            report.append(f"      - **Security Recommendations:**")
+                                            for rec in finding['recommendations']:
+                                                report.append(f"        - **Severity:** `{rec.get('severity').upper()}` Message: {rec.get('message')}")
+                                        else:
+                                            report.append(f"      - Security Recommendations: None found.")
 
-                                          # Report allowed authentication methods
-                                          auth_methods = finding.get('auth_methods')
-                                          if isinstance(auth_methods, list):
-                                              report.append(f"      - **Allowed Auth Methods:** `{', '.join(auth_methods)}`")
-                                              # Highlight if password auth seems disabled
-                                              if auth_methods and "password" not in auth_methods and "keyboard-interactive" not in auth_methods:
-                                                  report.append(f"        - **Note:** Password/Keyboard-Interactive auth likely disabled.")
-                                          elif auth_methods:
-                                               report.append(f"      - Auth Methods: (Could not parse list: {auth_methods})")
+                                        # Report allowed authentication methods
+                                        auth_methods = finding.get('auth_methods')
+                                        if isinstance(auth_methods, list):
+                                            report.append(f"      - **Allowed Auth Methods:** `{', '.join(auth_methods)}`")
+                                            # Highlight if password auth seems disabled
+                                            if auth_methods and "password" not in auth_methods and "keyboard-interactive" not in auth_methods:
+                                                report.append(f"        - **Note:** Password/Keyboard-Interactive auth likely disabled.")
+                                        elif auth_methods:
+                                            report.append(f"      - Auth Methods: (Could not parse list: {auth_methods})")
 
-                                          # Optionally report fingerprints
-                                          # if finding.get('fingerprints'):
-                                          #      report.append(f"      - Fingerprints:")
-                                          #      for fp_type, fp_value in finding['fingerprints'].items():
-                                          #           report.append(f"        - {fp_type.upper()}: {fp_value}")
-                                     
-                                     # Fallback to generic for other dict findings
-                                     else:
-                                          report.append(f"    - Type: `{finding.get('type', 'N/A')}`")
-                                          report.append(f"    - Message: {finding.get('message', 'N/A')}")
-                                     # Add other common fields if needed (e.g., path for default_files)
-                                     if 'path' in finding:
-                                         report.append(f"      - Path: `{finding.get('path')}`")
-                                     if 'url' in finding:
-                                         report.append(f"      - URL: `{finding.get('url')}`")
+                                        # Optionally report fingerprints
+                                        # if finding.get('fingerprints'):
+                                        #      report.append(f"      - Fingerprints:")
+                                        #      for fp_type, fp_value in finding['fingerprints'].items():
+                                        #           report.append(f"        - {fp_type.upper()}: {fp_value}")
+                                    
+                                    # Fallback to generic for other dict findings
+                                    else:
+                                        report.append(f"    - Type: `{finding.get('type', 'N/A')}`")
+                                        report.append(f"    - Message: {finding.get('message', 'N/A')}")
+                                    # Add other common fields if needed (e.g., path for default_files)
+                                    if 'path' in finding:
+                                        report.append(f"      - Path: `{finding.get('path')}`")
+                                    if 'url' in finding:
+                                        report.append(f"      - URL: `{finding.get('url')}`")
                             else:
-                                 # Handle cases where findings might be simple strings
-                                 report.append(f"    - {finding}")
+                                # Handle cases where findings might be simple strings
+                                report.append(f"    - {finding}")
                                 
                 elif result.get('message'): # Display message if no findings but message exists (e.g., skipped)
-                     report.append(f"  - Message: {result['message']}")
+                    report.append(f"  - Message: {result['message']}")
                     
                 report.append("") # Add spacing between test results
         else:
@@ -555,6 +563,11 @@ def _build_markdown_report(recon_data: Dict, attack_plan: Dict, exploit_results:
     if exploit_results:
         report.append("### Test Outcomes:")
         for result in exploit_results:
+            # Check if result is a dictionary before trying to access its properties
+            if not isinstance(result, dict):
+                report.append(f"- **Invalid Result:** `{result}`")
+                continue
+                
             # Use the structure from the original _build_markdown_report in ReportAgent class
             test_name = result.get('test', 'N/A')
             target_id = result.get('target', 'N/A')
@@ -574,10 +587,12 @@ def _build_markdown_report(recon_data: Dict, attack_plan: Dict, exploit_results:
                     for finding in findings_list:
                         if isinstance(finding, dict):
                                 report.append(f"    - **Category:** `{finding.get('category', 'N/A')}` (Level: `{finding.get('level', 'N/A')}`)")
-                                report.append(f"      - Description: {finding.get('description', 'N/A')}") # Use description
+                                # Use message field first, fallback to description if message doesn't exist
+                                description = finding.get('message', finding.get('description', 'N/A'))
+                                report.append(f"      - Description: {description}")
                                 if finding.get('parameter'):
                                     report.append(f"      - Parameter: `{finding.get('parameter')}` (Method: `{finding.get('method', 'N/A')}`)")
-                                    report.append(f"      - Reference: {finding.get('reference')}")
+                                    report.append(f"      - Reference: {finding.get('reference', 'N/A')}")
                                 # Optionally add curl command or details if needed
                                 # report.append(f"        - Details: `{finding.get('detail', {})}`") 
                         else:
@@ -827,7 +842,12 @@ def generate_final_report(context: ToolContext) -> Dict[str, Any]:
             logging.error("Failed to parse attack plan string as JSON")
             attack_plan = {}
     
+    # Ensure exploit_results is a list, even if it's not in the state or is invalid
     exploit_results = state.get('exploit_results', [])
+    if not isinstance(exploit_results, list):
+        logging.warning("exploit_results is not a list. Converting to empty list.")
+        print(f"[REPORT WARNING] exploit_results has invalid type: {type(exploit_results)}. Using empty list instead.")
+        exploit_results = []
     
     # If we don't have recon data, try one more time to load from emergency file
     if not nmap_results:
@@ -913,15 +933,17 @@ def simple_generate_final_report(**kwargs):
         try:
             # Import from ADK's in-memory session for global cache access
             from google.adk.sessions.in_memory_session_service import _get_from_global_cache
-            from google.adk.tools import ToolContext
-            from google.adk.sessions import Session
             
-            # Create a synthetic context with a session
-            context = ToolContext()
-            context.session = Session()
+            # Create a simplified mock context without relying on Session
+            class MockContext:
+                def __init__(self):
+                    class MockSession:
+                        def __init__(self):
+                            self.state = {}
+                    self.session = MockSession()
             
-            # Initialize state dictionary
-            context.session.state = {}
+            # Create a mock context object
+            context = MockContext()
             
             # Try to load critical data from global cache
             attack_plan = _get_from_global_cache('attack_plan')
@@ -970,9 +992,12 @@ def simple_generate_final_report(**kwargs):
         except Exception as e:
             print(f"[REPORT] Error creating synthetic context: {e}")
             # Fall back to empty context if all else fails
-            context = ToolContext()
-            context.session = Session()
-            context.session.state = {}
+            class MockContext:
+                def __init__(self):
+                    self.session = MockSession()
+                    self.session.state = {}
+            
+            context = MockContext()
     else:
         print(f"[REPORT] Using provided context with state keys: {list(context.session.state.keys()) if hasattr(context, 'session') and hasattr(context.session, 'state') else 'No state'}")
         
