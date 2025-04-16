@@ -132,3 +132,4 @@ cython_debug/
 current-progress.md
 prd.md
 *.txt
+reports/*
