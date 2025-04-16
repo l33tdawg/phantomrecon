@@ -9,75 +9,106 @@ from google.adk.planners import BuiltInPlanner
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-def _load_prompt_template() -> str:
-    """Load the attack planner prompt template."""
-    # Load prompt for the BuiltInPlanner
-    prompt_file = os.path.join(os.path.dirname(__file__), 
-                             '../../prompts/attack_planner_prompt.txt')
-    default_prompt = """Given the reconnaissance data, analyze open ports, services, and vulnerabilities to plan potential security tests.
+# Import global cache access
+try:
+    from google.adk.sessions.in_memory_session_service import _get_from_global_cache, _set_in_global_cache
+except ImportError:
+    # Define fallbacks if imports fail
+    def _get_from_global_cache(key, default=None):
+        print(f"[WARNING] Could not access global cache for key: {key}")
+        return default
 
-For each identified service in the scan data, create an attack plan specifying:
-1. Target host and port
-2. Service name, product, and version 
-3. A list of appropriate security tests to run based on the service type
+    def _set_in_global_cache(key, value):
+        print(f"[WARNING] Could not store in global cache for key: {key}")
+        return
 
-Format the output as a JSON object where each key is a unique service identifier (like "web_80" or "ssh_22") 
-and the value contains target_host, port, service_name, product, version, and a tests array.
-
-For example:
-{
-  "web_80": {
-    "target_host": "192.168.1.10",
-    "port": 80,
-    "service_name": "http",
-    "product": "Apache",
-    "version": "2.4.41",
-    "tests": [
-      "version_vulnerabilities", 
-      "directory_traversal",
-      "default_files",
-      "misconfigurations"
-    ]
-  },
-  "ssh_22": {
-    "target_host": "192.168.1.10",
-    "port": 22,
-    "service_name": "ssh",
-    "product": "OpenSSH",
-    "version": "8.2p1",
-    "tests": [
-      "version_vulnerabilities",
-      "weak_credentials",
-      "ssh_config_audit"
-    ]
-  }
-}
-
-Focus on common services like:
-- Web servers (HTTP/HTTPS): Check for known vulnerabilities, misconfigurations, default files, directory traversal
-- Databases (MySQL, PostgreSQL): Check for default credentials, version vulnerabilities, unauthorized access
-- SSH: Check for weak configurations, outdated versions, authentication bypass
-- FTP: Check for anonymous access, outdated versions, directory traversal
-- SMTP/Mail: Check for open relay, outdated versions, information disclosure
-
-If no actionable services are found, return an empty JSON object {}.
-""" # Basic default
-    try:
-        with open(prompt_file, 'r') as f:
-            return f.read()
-    except FileNotFoundError:
-        logger.warning(f"Prompt file not found at {prompt_file}. Using basic default.")
-        # Save default template if needed
+def _ensure_serializable(data):
+    """
+    Ensures that all data is serializable (JSON-compatible) by converting
+    complex objects to simple Python types.
+    
+    Args:
+        data: Any Python object
+        
+    Returns:
+        A JSON-serializable version of the data
+    """
+    if data is None:
+        return None
+    elif isinstance(data, (str, int, float, bool)):
+        return data
+    elif isinstance(data, dict):
+        return {k: _ensure_serializable(v) for k, v in data.items()}
+    elif isinstance(data, list):
+        return [_ensure_serializable(item) for item in data]
+    elif isinstance(data, tuple):
+        return [_ensure_serializable(item) for item in data]
+    elif isinstance(data, set):
+        return [_ensure_serializable(item) for item in data]
+    elif hasattr(data, '__dict__'):
+        # Handle custom objects by converting to dict
+        return _ensure_serializable(data.__dict__)
+    else:
+        # Convert anything else to string representation
         try:
-            os.makedirs(os.path.dirname(prompt_file), exist_ok=True)
-            with open(prompt_file, 'w') as f:
-                f.write(default_prompt)
-        except IOError as e:
-            logger.error(f"Could not write default prompt file: {e}")
-        return default_prompt
+            return str(data)
+        except Exception as e:
+            logger.warning(f"Could not convert {type(data)} to string: {e}")
+            return f"<Non-serializable object of type {type(data).__name__}>"
+
+def get_global_state(context=None) -> Dict[str, Any]:
+    """
+    Get state either from context.session.state or from global cache as fallback.
+    
+    This function handles the case where context is None by using the global cache.
+    
+    Args:
+        context: The ToolContext object, which may be None
+        
+    Returns:
+        Dict containing state values
+    """
+    state = {}
+    
+    # First try to get state from context if available
+    if context and hasattr(context, 'session') and hasattr(context.session, 'state'):
+        state = context.session.state
+        print(f"[PLANNER-STATE] Using state from context with {len(state)} keys")
+        return state
+    
+    # If context is not available, try to get state from emergency cache
+    print(f"[PLANNER-STATE] Context not available, using global cache fallback")
+    
+    # Get important keys from global cache
+    try:
+        # Try to get recon data first
+        recon = _get_from_global_cache('recon')
+        if recon:
+            state['recon'] = recon
+            print(f"[PLANNER-STATE] Retrieved recon from global cache")
+            
+        # Try to get initial target as backup
+        target = _get_from_global_cache('initial_target')
+        if target:
+            state['initial_target'] = target
+            print(f"[PLANNER-STATE] Retrieved initial_target from global cache: {target}")
     except Exception as e:
-        logger.error(f"Error loading prompt template: {e}")
-        return default_prompt # Return default on other errors
+        print(f"[PLANNER-WARNING] Error accessing global cache: {e}")
+    
+    # If state is still empty, try emergency file cache as last resort
+    if not state or 'recon' not in state:
+        try:
+            import pickle
+            cache_file = 'recon_cache.pkl'
+            if os.path.exists(cache_file):
+                with open(cache_file, 'rb') as f:
+                    recon_data = pickle.load(f)
+                    print(f"[PLANNER-STATE] Loaded recon data from cache file with {len(recon_data) if isinstance(recon_data, dict) else 0} keys")
+                    state['recon'] = recon_data
+        except Exception as e:
+            print(f"[PLANNER-WARNING] Could not load from emergency cache file: {e}")
+    
+    return state
 
 async def create_attack_plan(scan_data: Dict, context=None) -> Dict:
     """
@@ -133,21 +164,35 @@ async def create_attack_plan(scan_data: Dict, context=None) -> Dict:
                     "tests": ["enumerate_all_subdomains", "check_for_zone_transfer"]
                 }
         
+        # Get state for storing
+        state = get_global_state(context)
+        
         # Store in session state if context is available
         if context and hasattr(context, 'session') and hasattr(context.session, 'state'):
             try:
-                context.session.state['attack_plan'] = attack_plan
-                logger.info("Stored attack plan in session state")
+                # Ensure the attack plan is serializable before storing
+                serializable_plan = _ensure_serializable(attack_plan)
+                context.session.state['attack_plan'] = serializable_plan
+                print(f"[PLANNER] Stored attack plan in session state")
             except Exception as e:
                 logger.warning(f"Failed to store attack plan in session state: {e}")
-                
-                # Try direct access to global cache
-                try:
-                    from google.adk.sessions.in_memory_session_service import _set_in_global_cache
-                    _set_in_global_cache('attack_plan', attack_plan)
-                    logger.info("Stored attack plan directly in global cache")
-                except ImportError:
-                    logger.warning("Could not access global cache")
+        
+        # Always store in global cache as a fallback
+        try:
+            serializable_plan = _ensure_serializable(attack_plan)
+            _set_in_global_cache('attack_plan', serializable_plan)
+            print(f"[PLANNER] Stored attack plan in global cache")
+        except Exception as e:
+            logger.warning(f"Failed to store in global cache: {e}")
+        
+        # Also save to emergency file as last resort
+        try:
+            import pickle
+            with open('plan_cache.pkl', 'wb') as f:
+                pickle.dump(attack_plan, f)
+            print(f"[PLANNER] Saved plan to emergency cache file")
+        except Exception as e:
+            print(f"[PLANNER] Warning: Could not save plan to cache: {e}")
             
         return attack_plan
         
@@ -157,62 +202,50 @@ async def create_attack_plan(scan_data: Dict, context=None) -> Dict:
 
 async def simple_create_attack_plan(**kwargs):
     """
-    A greatly simplified wrapper for create_attack_plan with minimal parameter declarations
-    to help ADK's automatic function calling.
+    A simplified wrapper for create_attack_plan that helps ADK's automatic function calling.
+    This function extracts reconnaissance data from either:
+    1. Direct recon argument
+    2. Session state (if context available)
+    3. Fallback to emergency cache file
     
     Returns:
-        A structured attack plan or error dictionary
+        dict: Attack plan or error message
     """
-    logger.info("Using simplified wrapper for attack planning")
     
-    # Get context if available
+    print("[PLANNER] Starting plan creation....")
+    
+    # Extract context from kwargs
     context = kwargs.get('context')
     
-    # Extract scan data from session state if available
-    scan_data = {}
+    # Extract scan data from various sources
+    scan_data = kwargs.get('recon_data')  # Direct argument takes precedence
     
-    # Print detailed context object information for debugging
-    print(f"[PLANNER] Context type: {type(context)}")
-    if context:
-        print(f"[PLANNER] Context has session: {hasattr(context, 'session')}")
-        if hasattr(context, 'session'):
-            print(f"[PLANNER] Session type: {type(context.session)}")
-            print(f"[PLANNER] Session has state: {hasattr(context.session, 'state')}")
-            if hasattr(context.session, 'state'):
-                print(f"[PLANNER] State type: {type(context.session.state)}")
-                print(f"[PLANNER] State keys: {list(context.session.state.keys())}")
-                
-                # Try to look for recon data from each key
-                if 'recon' in context.session.state:
-                    print(f"[PLANNER] Found recon data in session state with keys: {list(context.session.state['recon'].keys())}")
-                    scan_data = context.session.state['recon']
-                else:
-                    print(f"[PLANNER] No valid recon data found in session state")
-                    
-                    # Try to look for individual recon components
-                    nmap_results = context.session.state.get('nmap_scan_results')
-                    dns_results = context.session.state.get('dns_recon_results')
-                    web_results = context.session.state.get('web_search_results')
-                    
-                    if any([nmap_results, dns_results, web_results]):
-                        print(f"[PLANNER] Found individual recon components, building composite data")
-                        scan_data = {
-                            "nmap_scan": nmap_results if nmap_results else {},
-                            "dns_recon": dns_results if dns_results else {},
-                            "web_search": web_results if web_results else {}
-                        }
-            else:
-                print(f"[PLANNER] Session state is undefined or inaccessible")
+    # If no direct recon_data, try to get from state
+    if not scan_data:
+        # Get global state (context and fallbacks)
+        state = get_global_state(context)
+        
+        # First try to get from recon key
+        scan_data = state.get('recon')
+        if scan_data:
+            print(f"[PLANNER] Using reconnaissance data from state['recon']")
         else:
-            print(f"[PLANNER] Session is undefined or inaccessible")
-    else:
-        # Log this but don't treat it as an error - we'll use the emergency cache
-        print(f"[PLANNER] Context is not provided, will check emergency cache")
-    
-    # If we still don't have scan data, try kwargs as a last resort
-    if not scan_data and 'scan_data' in kwargs:
-        scan_data = kwargs['scan_data']
-        print(f"[PLANNER] Using scan_data from kwargs")
+            # Try to assemble from individual recon pieces
+            print(f"[PLANNER] No 'recon' key found, trying to assemble from pieces")
+            nmap_scan = state.get('nmap_scan_results', {})
+            dns_recon = state.get('dns_recon_results', {})
+            web_search = state.get('web_search_results', {})
+            web_analysis = state.get('web_content_analysis', {})
+            
+            if any([nmap_scan, dns_recon, web_search, web_analysis]):
+                scan_data = {
+                    "nmap_scan": nmap_scan,
+                    "dns_recon": dns_recon,
+                    "web_search": web_search,
+                    "web_analysis": web_analysis,
+                    "target": state.get('initial_target', "unknown")
+                }
+                print(f"[PLANNER] Assembled recon data from individual components")
     
     # Validate scan_data - ensure it's not empty and has required keys
     if not scan_data:
@@ -259,7 +292,7 @@ async def simple_create_attack_plan(**kwargs):
             else:
                 print(f"[PLANNER] Plan generated successfully with {len(result)} items")
                 
-                # Save to emergency cache file for future reference
+                # Always save to emergency cache file for future reference
                 try:
                     import pickle
                     with open('plan_cache.pkl', 'wb') as f:
@@ -268,19 +301,21 @@ async def simple_create_attack_plan(**kwargs):
                 except Exception as e:
                     print(f"[PLANNER] Warning: Could not save plan to cache: {e}")
                     
+        # Always store in global cache as fallback
+        try:
+            serializable_result = _ensure_serializable(result)
+            _set_in_global_cache('attack_plan', serializable_result)
+            print(f"[PLANNER] Stored attack_plan in global cache")
+        except Exception as e:
+            print(f"[PLANNER] Warning: Failed to store in global cache: {e}")
+        
         # Store back in session state explicitly to help with persistence
         if context and hasattr(context, 'session') and hasattr(context.session, 'state'):
             try:
-                context.session.state['attack_plan'] = result
+                # Ensure the result is serializable
+                serializable_result = _ensure_serializable(result)
+                context.session.state['attack_plan'] = serializable_result
                 print(f"[PLANNER] Stored attack_plan in session state")
-                
-                # Try direct access to global cache
-                try:
-                    from google.adk.sessions.in_memory_session_service import _set_in_global_cache
-                    _set_in_global_cache('attack_plan', result)
-                    print(f"[PLANNER] Also stored attack_plan directly in global cache")
-                except ImportError:
-                    pass
             except Exception as e:
                 print(f"[PLANNER] Warning: Failed to store attack plan in session state: {e}")
                 
@@ -289,6 +324,4 @@ async def simple_create_attack_plan(**kwargs):
         error_msg = f"Planning error: {str(e)}"
         print(f"[PLANNER ERROR] {error_msg}")
         logger.error(f"Error in simple_create_attack_plan: {e}", exc_info=True)
-        return {"error": error_msg}
-
-# Removed prioritize_targets function for simplicity in this refactor step. 
+        return {"error": error_msg} 

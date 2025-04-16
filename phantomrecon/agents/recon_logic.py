@@ -24,6 +24,18 @@ from google.adk.code_executors import UnsafeLocalCodeExecutor
 import aiohttp
 import asyncio
 from google.adk.tools import google_search_tool # Import ADK Google Search 
+# Import global cache access
+try:
+    from google.adk.sessions.in_memory_session_service import _get_from_global_cache, _set_in_global_cache
+except ImportError:
+    # Define fallbacks if imports fail
+    def _get_from_global_cache(key, default=None):
+        print(f"[WARNING] Could not access global cache for key: {key}")
+        return default
+
+    def _set_in_global_cache(key, value):
+        print(f"[WARNING] Could not store in global cache for key: {key}")
+        return
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -840,6 +852,92 @@ def _parse_nmap_output(nmap_output: str) -> Dict[str, Any]:
         
     return results
 
+def _ensure_serializable(data):
+    """
+    Ensures that all data is serializable (JSON-compatible) by converting
+    complex objects to simple Python types.
+    
+    Args:
+        data: Any Python object
+        
+    Returns:
+        A JSON-serializable version of the data
+    """
+    if data is None:
+        return None
+    elif isinstance(data, (str, int, float, bool)):
+        return data
+    elif isinstance(data, dict):
+        return {k: _ensure_serializable(v) for k, v in data.items()}
+    elif isinstance(data, list):
+        return [_ensure_serializable(item) for item in data]
+    elif isinstance(data, tuple):
+        return [_ensure_serializable(item) for item in data]
+    elif isinstance(data, set):
+        return [_ensure_serializable(item) for item in data]
+    elif hasattr(data, '__dict__'):
+        # Handle custom objects by converting to dict
+        return _ensure_serializable(data.__dict__)
+    else:
+        # Convert anything else to string representation
+        try:
+            return str(data)
+        except Exception as e:
+            logger.warning(f"Could not convert {type(data)} to string: {e}")
+            return f"<Non-serializable object of type {type(data).__name__}>"
+
+def get_global_state(context=None) -> Dict[str, Any]:
+    """
+    Get state either from context.session.state or from global cache as fallback.
+    
+    This function handles the case where context is None by using the global cache.
+    
+    Args:
+        context: The ToolContext object, which may be None
+        
+    Returns:
+        Dict containing state values
+    """
+    state = {}
+    
+    # First try to get state from context if available
+    if context and hasattr(context, 'session') and hasattr(context.session, 'state'):
+        state = context.session.state
+        print(f"[STATE] Using state from context with {len(state)} keys")
+        return state
+    
+    # If context is not available, try to get state from emergency cache
+    print(f"[STATE] Context not available, using global cache fallback")
+    
+    # Get important keys from global cache
+    try:
+        target = _get_from_global_cache('initial_target')
+        if target:
+            state['initial_target'] = target
+            print(f"[STATE] Retrieved initial_target from global cache: {target}")
+    except Exception as e:
+        print(f"[WARNING] Error accessing global cache: {e}")
+    
+    # If state is still empty, try emergency file cache as last resort
+    if not state:
+        try:
+            import pickle
+            cache_file = 'recon_cache.pkl'
+            if os.path.exists(cache_file):
+                with open(cache_file, 'rb') as f:
+                    recon_data = pickle.load(f)
+                    # Extract target from recon data if available
+                    if 'target' in recon_data:
+                        state['initial_target'] = recon_data['target']
+                        print(f"[STATE] Retrieved initial_target from cache file: {state['initial_target']}")
+                    # Store full recon data
+                    state['recon'] = recon_data
+                    print(f"[STATE] Loaded {len(recon_data)} keys from cache file")
+        except Exception as e:
+            print(f"[WARNING] Could not load from emergency cache file: {e}")
+    
+    return state
+
 async def perform_parallel_recon(**kwargs) -> Dict[str, Any]:
     """
     Performs all reconnaissance methods (nmap, dns, web search) in parallel.
@@ -866,35 +964,41 @@ async def perform_parallel_recon(**kwargs) -> Dict[str, Any]:
         else:
             print(f"[DEBUG-PARALLEL] initial_target key does not exist in state")
     
+    # Get state using our helper function, which handles cases where context is None
+    state = get_global_state(context)
+    
     # THEN check for direct target override
     direct_target = kwargs.get('direct_target_override')
     if direct_target:
         print(f"[PARALLEL] Using direct target override: {direct_target}")
         target = direct_target
     else:
-        # Extract target from context - prioritize initial_target
-        target = None
-        if context and hasattr(context, 'session') and hasattr(context.session, 'state'):
-            # Try to get from initial_target first (set by ValidationAgent)
-            target = context.session.state.get('initial_target')
-            if target:
-                logger.info(f"Found target in session state[initial_target]: {target}")
-                print(f"[STATE] Retrieved target from session state: {target}")
-            else:
-                # Fall back to checking other potential state keys
-                for potential_key in ['validation_result', 'user_input', 'target']:
-                    if potential_key in context.session.state:
-                        potential_target = context.session.state.get(potential_key)
-                        if potential_target and isinstance(potential_target, str):
-                            target = potential_target
-                            print(f"[STATE] Found target in {potential_key}: {target}")
-                            # Store it in initial_target for consistency
-                            context.session.state['initial_target'] = target
-                            break
-                
-                if not target:
-                    logger.warning("Could not find target in any state key")
-                    print("[STATE] Could not find target in any state key")
+        # Extract target from state, prioritizing initial_target
+        target = state.get('initial_target')
+        if target:
+            logger.info(f"Found target in state[initial_target]: {target}")
+            print(f"[STATE] Retrieved target from state: {target}")
+        else:
+            # Fall back to checking other potential state keys
+            for potential_key in ['validation_result', 'user_input', 'target']:
+                potential_target = state.get(potential_key)
+                if potential_target and isinstance(potential_target, str):
+                    target = potential_target
+                    print(f"[STATE] Found target in {potential_key}: {target}")
+                    # Store it in initial_target for consistency
+                    if context and hasattr(context, 'session') and hasattr(context.session, 'state'):
+                        context.session.state['initial_target'] = target
+                    # Also store in global cache
+                    try:
+                        _set_in_global_cache('initial_target', target)
+                        print(f"[STATE] Stored initial_target in global cache: {target}")
+                    except Exception as e:
+                        print(f"[WARNING] Error storing in global cache: {e}")
+                    break
+            
+            if not target:
+                logger.warning("Could not find target in any state key")
+                print("[STATE] Could not find target in any state key")
     
     # If no target is found, return an error
     if not target:
@@ -911,7 +1015,21 @@ async def perform_parallel_recon(**kwargs) -> Dict[str, Any]:
         
         # Store this error in session state
         if context and hasattr(context, 'session') and hasattr(context.session, 'state'):
-            context.session.state['recon'] = results
+            try:
+                # Apply serialization fix to error result
+                serializable_results = _ensure_serializable(results)
+                context.session.state['recon'] = serializable_results
+                print(f"[STATE] Stored error in recon state")
+            except Exception as e:
+                logger.warning(f"Failed to store error in state: {e}")
+        
+        # Also store in global cache regardless of context
+        try:
+            serializable_results = _ensure_serializable(results)
+            _set_in_global_cache('recon', serializable_results)
+            print(f"[STATE] Stored error in global cache")
+        except Exception as e:
+            logger.warning(f"Failed to store error in global cache: {e}")
         
         return results
     
@@ -999,26 +1117,34 @@ async def perform_parallel_recon(**kwargs) -> Dict[str, Any]:
     # Store results in session state if possible
     if context and hasattr(context, 'session') and hasattr(context.session, 'state'):
         try:
+            # Convert all results to serializable format before storing
+            print(f"[STATE] Ensuring all recon data is serializable before storing in state")
+            
             # Store all individual results in session state
             if not isinstance(nmap_result, Exception):
-                context.session.state['nmap_scan_results'] = nmap_result
+                serializable_nmap = _ensure_serializable(nmap_result)
+                context.session.state['nmap_scan_results'] = serializable_nmap
                 print(f"[STATE] Stored nmap_scan_results in session state")
             
             if not isinstance(dns_result, Exception):
-                context.session.state['dns_recon_results'] = dns_result
+                serializable_dns = _ensure_serializable(dns_result)
+                context.session.state['dns_recon_results'] = serializable_dns
                 print(f"[STATE] Stored dns_recon_results in session state")
             
             if not isinstance(web_result, Exception):
-                context.session.state['web_search_results'] = web_result
+                serializable_web = _ensure_serializable(web_result)
+                context.session.state['web_search_results'] = serializable_web
                 print(f"[STATE] Stored web_search_results in session state")
             
             # Store web analysis results if available
             if "web_analysis" in results and (not isinstance(results["web_analysis"], dict) or not results["web_analysis"].get("error")):
-                context.session.state['web_content_analysis'] = results["web_analysis"]
+                serializable_web_analysis = _ensure_serializable(results["web_analysis"])
+                context.session.state['web_content_analysis'] = serializable_web_analysis
                 print(f"[STATE] Stored web_content_analysis in session state")
             
             # Store the combined results in 'recon'
-            context.session.state['recon'] = results
+            serializable_results = _ensure_serializable(results)
+            context.session.state['recon'] = serializable_results
             logger.debug("Stored combined recon results in session state.")
             print("[INFO] Combined reconnaissance results stored in session state")
             
@@ -1033,8 +1159,58 @@ async def perform_parallel_recon(**kwargs) -> Dict[str, Any]:
                 print(f"[VERIFY] 'recon' is NOT in state after attempted save!")
                 
         except Exception as e:
+            # Add detailed logging for the exception
+            logger.exception(f"Detailed error storing state:") 
             print(f"[WARNING] Error storing in session state: {e}")
-            # Emergency file-based fallback
+            # Try global cache as fallback
+            try:
+                serializable_results = _ensure_serializable(results)
+                _set_in_global_cache('recon', serializable_results)
+                print(f"[STATE] Stored recon in global cache")
+                
+                # Also store individual components
+                if not isinstance(nmap_result, Exception):
+                    _set_in_global_cache('nmap_scan_results', _ensure_serializable(nmap_result))
+                if not isinstance(dns_result, Exception):
+                    _set_in_global_cache('dns_recon_results', _ensure_serializable(dns_result))
+                if not isinstance(web_result, Exception):
+                    _set_in_global_cache('web_search_results', _ensure_serializable(web_result))
+                    
+                print(f"[STATE] Stored individual components in global cache")
+            except Exception as e2:
+                print(f"[WARNING] Could not store in global cache: {e2}")
+                # Emergency file-based fallback
+                try:
+                    import pickle
+                    import os
+                    cache_file = 'recon_cache.pkl'
+                    with open(cache_file, 'wb') as f:
+                        pickle.dump(results, f)
+                    print(f"[INFO] Saved recon results to emergency cache file: {cache_file}")
+                except Exception as e3:
+                    print(f"[WARNING] Could not save to emergency cache file: {e3}")
+    else:
+        logger.warning("Could not access session state to store combined recon results.")
+        print("[WARNING] Could not store reconnaissance results in session state")
+        
+        # Always store in global cache as the primary fallback
+        try:
+            serializable_results = _ensure_serializable(results)
+            _set_in_global_cache('recon', serializable_results)
+            print(f"[STATE] Stored recon in global cache")
+            
+            # Also store individual components
+            if not isinstance(nmap_result, Exception):
+                _set_in_global_cache('nmap_scan_results', _ensure_serializable(nmap_result))
+            if not isinstance(dns_result, Exception):
+                _set_in_global_cache('dns_recon_results', _ensure_serializable(dns_result))
+            if not isinstance(web_result, Exception):
+                _set_in_global_cache('web_search_results', _ensure_serializable(web_result))
+                
+            print(f"[STATE] Stored individual components in global cache")
+        except Exception as e:
+            print(f"[WARNING] Could not store in global cache: {e}")
+            # Emergency file-based fallback as last resort
             try:
                 import pickle
                 import os
@@ -1044,19 +1220,5 @@ async def perform_parallel_recon(**kwargs) -> Dict[str, Any]:
                 print(f"[INFO] Saved recon results to emergency cache file: {cache_file}")
             except Exception as e2:
                 print(f"[WARNING] Could not save to emergency cache file: {e2}")
-    else:
-        logger.warning("Could not access session state to store combined recon results.")
-        print("[WARNING] Could not store reconnaissance results in session state")
-        
-        # Emergency file-based fallback even if session state fails
-        try:
-            import pickle
-            import os
-            cache_file = 'recon_cache.pkl'
-            with open(cache_file, 'wb') as f:
-                pickle.dump(results, f)
-            print(f"[INFO] Saved recon results to emergency cache file: {cache_file}")
-        except Exception as e:
-            print(f"[WARNING] Could not save to emergency cache file: {e}")
     
     return results

@@ -1,14 +1,99 @@
 #!/usr/bin/env python3
 import os
 import json
-from typing import Dict, List
+from typing import Dict, List, Any
 from datetime import datetime
 import markdown2
 from rich.console import Console
 from google.adk.tools import ToolContext
 import logging
 
+# Import global cache access
+try:
+    from google.adk.sessions.in_memory_session_service import _get_from_global_cache, _set_in_global_cache
+except ImportError:
+    # Define fallbacks if imports fail
+    def _get_from_global_cache(key, default=None):
+        print(f"[WARNING] Could not access global cache for key: {key}")
+        return default
+
+    def _set_in_global_cache(key, value):
+        print(f"[WARNING] Could not store in global cache for key: {key}")
+        return
+
 console = Console()
+
+def get_global_state(context=None) -> Dict:
+    """
+    Get state either from context.session.state or from global cache as fallback.
+    
+    This function handles the case where context is None by using the global cache.
+    
+    Args:
+        context: The ToolContext object, which may be None
+        
+    Returns:
+        Dict containing state values
+    """
+    state = {}
+    
+    # First try to get state from context if available
+    if context and hasattr(context, 'session') and hasattr(context.session, 'state'):
+        state = context.session.state
+        print(f"[REPORT-STATE] Using state from context with {len(state)} keys")
+        return state
+    
+    # If context is not available, try to get state from emergency cache
+    print(f"[REPORT-STATE] Context not available, using global cache fallback")
+    
+    # Get important keys from global cache
+    try:
+        # Try to get recon data first
+        recon = _get_from_global_cache('recon')
+        if recon:
+            state['recon'] = recon
+            print(f"[REPORT-STATE] Retrieved recon from global cache")
+            
+        # Try to get attack plan
+        attack_plan = _get_from_global_cache('attack_plan')
+        if attack_plan:
+            state['attack_plan'] = attack_plan
+            print(f"[REPORT-STATE] Retrieved attack_plan from global cache")
+            
+        # Try to get exploit results
+        exploit_results = _get_from_global_cache('exploit_results')
+        if exploit_results:
+            state['exploit_results'] = exploit_results
+            print(f"[REPORT-STATE] Retrieved exploit_results from global cache")
+    except Exception as e:
+        print(f"[REPORT-WARNING] Error accessing global cache: {e}")
+    
+    # If state is still empty or missing key components, try emergency file cache
+    if not state or 'recon' not in state:
+        try:
+            import pickle
+            recon_cache_file = 'recon_cache.pkl'
+            if os.path.exists(recon_cache_file):
+                with open(recon_cache_file, 'rb') as f:
+                    recon_data = pickle.load(f)
+                    state['recon'] = recon_data
+                    print(f"[REPORT-STATE] Loaded recon from cache file")
+        except Exception as e:
+            print(f"[REPORT-WARNING] Could not load recon from cache file: {e}")
+            
+    if 'attack_plan' not in state:
+        try:
+            import pickle
+            plan_cache_file = 'plan_cache.pkl'
+            if os.path.exists(plan_cache_file):
+                with open(plan_cache_file, 'rb') as f:
+                    plan_data = pickle.load(f)
+                    state['attack_plan'] = plan_data
+                    print(f"[REPORT-STATE] Loaded attack plan from cache file")
+        except Exception as e:
+            print(f"[REPORT-WARNING] Could not load attack plan from cache file: {e}")
+    
+    return state
 
 class ReportAgent:
     def __init__(self, output_dir: str = "reports"):
@@ -704,111 +789,68 @@ def _build_markdown_report(recon_data: Dict, attack_plan: Dict, exploit_results:
     
     return "\n".join(report)
 
-def generate_final_report(context: ToolContext) -> str:
+def generate_final_report(context: ToolContext) -> Dict[str, Any]:
     """
-    Generate a final report based on all collected data in the session state.
+    Generate a comprehensive penetration test report based on the findings
+    from all previous reconnaissance and exploitation steps.
     
     Args:
-        context: Tool context for accessing session state
+        context: The tool context with session state
         
     Returns:
-        A Markdown report as a string
+        A dictionary containing the final report
     """
     logging.info("Generating final report...")
     
-    # Initialize empty data
-    recon_data = {}
-    attack_plan = {}
-    exploit_results = []
+    # Get state using our helper function
+    state = get_global_state(context)
     
-    # First, try to get data from context
-    if hasattr(context, 'session') and hasattr(context.session, 'state'):
-        state = context.session.state
-        
-        # Extract reconnaissance data
-        if 'recon' in state:
-            recon_data = state['recon']
-        else:
-            # Try to get individual recon pieces
-            nmap_scan = state.get('nmap_scan_results', {})
-            dns_recon = state.get('dns_recon_results', {})
-            web_search = state.get('web_search_results', {})
-            web_analysis = state.get('web_content_analysis', {})
-            
-            if any([nmap_scan, dns_recon, web_search, web_analysis]):
-                recon_data = {
-                    "nmap_scan": nmap_scan,
-                    "dns_recon": dns_recon,
-                    "web_search": web_search,
-                    "web_analysis": web_analysis,
-                    "target": state.get('initial_target', "unknown")
-                }
-        
-        # Extract attack plan
-        if 'attack_plan' in state:
-            attack_plan = state['attack_plan']
-            
-        # Extract exploit results
-        if 'exploit_results' in state:
-            exploit_results = state['exploit_results']
-            if not isinstance(exploit_results, list):
-                exploit_results = [exploit_results]
+    # Extract data from state
+    nmap_results = state.get('nmap_results', {})
+    dns_results = state.get('dns_results', {})
+    attack_plan = state.get('attack_plan', {})
     
-    # If data is still missing, try global cache
-    if not recon_data or not attack_plan:
+    # Handle the case where attack_plan is a string (JSON serialized)
+    if isinstance(attack_plan, str):
+        logging.info("Attack plan is a string, attempting to parse as JSON")
         try:
-            from google.adk.sessions.in_memory_session_service import _get_from_global_cache
-            if not recon_data:
-                recon_data = _get_from_global_cache('recon')
-            if not attack_plan:
-                attack_plan = _get_from_global_cache('attack_plan')
-            logging.info("Retrieved data from global cache")
-        except (ImportError, Exception) as e:
-            logging.warning(f"Could not access global cache: {e}")
+            attack_plan = json.loads(attack_plan)
+            logging.info("Successfully parsed attack plan string")
+        except json.JSONDecodeError:
+            logging.error("Failed to parse attack plan string as JSON")
+            attack_plan = {}
     
-    # If still missing data, try emergency cache files
-    if not recon_data:
+    exploit_results = state.get('exploit_results', [])
+    
+    # If we don't have recon data, try one more time to load from emergency file
+    if not nmap_results:
         try:
             import pickle
-            import os
-            cache_file = 'recon_cache.pkl'
-            if os.path.exists(cache_file):
-                with open(cache_file, 'rb') as f:
-                    recon_data = pickle.load(f)
-                logging.info("Loaded recon data from emergency cache file")
+            recon_cache_file = 'recon_cache.pkl'
+            if os.path.exists(recon_cache_file):
+                with open(recon_cache_file, 'rb') as f:
+                    nmap_results = pickle.load(f)
+                print(f"[REPORT] Loaded recon from emergency cache file as last resort")
         except Exception as e:
-            logging.warning(f"Could not load recon data from cache file: {e}")
-            
-    if not attack_plan:
-        try:
-            import pickle
-            import os
-            cache_file = 'plan_cache.pkl'
-            if os.path.exists(cache_file):
-                with open(cache_file, 'rb') as f:
-                    attack_plan = pickle.load(f)
-                logging.info("Loaded attack plan from emergency cache file")
-        except Exception as e:
-            logging.warning(f"Could not load attack plan from cache file: {e}")
+            logging.error(f"Could not load recon data from emergency cache: {e}")
+            print(f"[REPORT ERROR] No reconnaissance data available")
+            nmap_results = {"error": "No reconnaissance data available"}
     
-    # Ensure we have minimal required data
-    if not recon_data:
-        recon_data = {
-            "target": getattr(context.session.state, 'initial_target', "unknown"),
-            "error": "No reconnaissance data available"
-        }
+    # Determine the target
+    target = "unknown"
+    if isinstance(nmap_results, dict):
+        target = nmap_results.get('target', "unknown")
     
-    if not attack_plan:
-        attack_plan = {
-            "error": "No attack plan available"
-        }
+    if target == "unknown" and 'initial_target' in state:
+        target = state['initial_target']
+        
+    print(f"[REPORT] Generating report for target: {target}")
     
-    # Generate the summary
-    target = recon_data.get('target', 'unknown')
+    # Create summary text
     summary_text = f"Security assessment for {target}"
     
     # Build the markdown report
-    report_content = _build_markdown_report(recon_data, attack_plan, exploit_results, summary_text)
+    report_content = _build_markdown_report(nmap_results, attack_plan, exploit_results, summary_text)
     
     # Save the report to a file in reports/ directory
     try:
@@ -819,23 +861,33 @@ def generate_final_report(context: ToolContext) -> str:
         
         # Generate timestamped filename
         timestamp = time.strftime("%Y%m%d-%H%M%S")
-        target_name = recon_data.get('target', 'unknown').replace('.', '-')
+        target_name = target.replace('.', '-')
         report_filename = f"{reports_dir}/security-report-{target_name}-{timestamp}.md"
         
         with open(report_filename, 'w') as f:
             f.write(report_content)
         
         logging.info(f"Report saved to {report_filename}")
+        print(f"[REPORT] Saved to {report_filename}")
         
         # Try to generate HTML version
         html_path = report_filename.replace('.md', '.html')
         _generate_html_report(report_content, html_path)
     except Exception as e:
         logging.error(f"Failed to save report: {e}")
+        print(f"[REPORT ERROR] Failed to save report file: {e}")
     
-    # If context has session state, store the final report
-    if hasattr(context, 'session') and hasattr(context.session, 'state'):
+    # Store the final report in session state if possible
+    if context and hasattr(context, 'session') and hasattr(context.session, 'state'):
         context.session.state['final_report'] = report_content
+        print(f"[REPORT] Stored final report in session state")
+    
+    # Also store in global cache as backup
+    try:
+        _set_in_global_cache('final_report', report_content)
+        print(f"[REPORT] Stored final report in global cache")
+    except Exception as e:
+        print(f"[REPORT WARNING] Failed to store report in global cache: {e}")
     
     return report_content
 
@@ -861,4 +913,112 @@ def simple_generate_final_report(**kwargs):
         
         return generate_final_report(minimal_context)
         
-    return generate_final_report(context) 
+    return generate_final_report(context)
+
+def report_service_summary(attack_plan: Dict[str, Any]) -> str:
+    """
+    Generates a summary of discovered services from the attack plan.
+    
+    Args:
+        attack_plan: The attack plan dictionary
+        
+    Returns:
+        A summary of services as a markdown string
+    """
+    if not attack_plan:
+        return "No services were discovered."
+        
+    # Handle the case where attack_plan is a string (JSON serialized)
+    if isinstance(attack_plan, str):
+        try:
+            attack_plan = json.loads(attack_plan)
+        except json.JSONDecodeError:
+            logging.error("Failed to parse attack plan string as JSON")
+            return "Error parsing service information."
+    
+    # Ensure attack_plan is a dictionary
+    if not isinstance(attack_plan, dict):
+        logging.error(f"Attack plan is not a dictionary: {type(attack_plan)}")
+        return "Error processing service information."
+    
+    services = []
+    for service_name, info in attack_plan.items():
+        service_info = {
+            "name": service_name,
+            "port": info.get("port", "Unknown"),
+            "protocol": info.get("protocol", "Unknown"),
+            "service": info.get("service", "Unknown"),
+            "version": info.get("version", "Unknown"),
+            "exploited": info.get("exploited", False)
+        }
+        services.append(service_info)
+    
+    # Generate markdown output
+    markdown = "## Services Summary\n\n"
+    
+    if not services:
+        markdown += "No services were discovered.\n"
+        return markdown
+    
+    markdown += "| Service | Port | Protocol | Version | Exploited |\n"
+    markdown += "|---------|------|----------|---------|----------|\n"
+    
+    for service in services:
+        exploited = "✅" if service["exploited"] else "❌"
+        markdown += f"| {service['name']} | {service['port']} | {service['protocol']} | {service['version']} | {exploited} |\n"
+    
+    return markdown
+
+def generate_vulnerability_profile(attack_plan: Dict[str, Any], nmap_results: Dict[str, Any]) -> str:
+    """
+    Generates a comprehensive vulnerability profile from attack plan and nmap results.
+    
+    Args:
+        attack_plan: The attack plan dictionary
+        nmap_results: The nmap scan results
+        
+    Returns:
+        A vulnerability profile as a markdown string
+    """
+    # Handle the case where attack_plan is a string (JSON serialized)
+    if isinstance(attack_plan, str):
+        try:
+            attack_plan = json.loads(attack_plan)
+        except json.JSONDecodeError:
+            logging.error("Failed to parse attack plan string as JSON")
+            return "Error parsing vulnerability information."
+    
+    # Ensure attack_plan is a dictionary
+    if not isinstance(attack_plan, dict):
+        logging.error(f"Attack plan is not a dictionary: {type(attack_plan)}")
+        return "Error processing vulnerability information."
+    
+    vulnerabilities = []
+    
+    # Generate vulnerabilities from attack plan
+    for service_name, info in attack_plan.items():
+        if "vulnerabilities" in info:
+            for vuln in info["vulnerabilities"]:
+                vulnerabilities.append({
+                    "service": service_name,
+                    "name": vuln.get("name", "Unknown"),
+                    "severity": vuln.get("severity", "Medium"),
+                    "description": vuln.get("description", ""),
+                    "exploited": vuln.get("exploited", False)
+                })
+    
+    # Generate markdown output
+    markdown = "## Vulnerability Profile\n\n"
+    
+    if not vulnerabilities:
+        markdown += "No vulnerabilities were identified.\n"
+        return markdown
+    
+    markdown += "| Service | Vulnerability | Severity | Exploited | Description |\n"
+    markdown += "|---------|--------------|----------|-----------|-------------|\n"
+    
+    for vuln in vulnerabilities:
+        exploited = "✅" if vuln["exploited"] else "❌"
+        markdown += f"| {vuln['service']} | {vuln['name']} | {vuln['severity']} | {exploited} | {vuln['description']} |\n"
+    
+    return markdown 

@@ -1,43 +1,60 @@
 #!/usr/bin/env python3
 from typing import Dict, Any, Optional, Union
 import logging
+import json
 from google.adk.tools import ToolContext
 from google.adk.agents import Agent
 
 logger = logging.getLogger(__name__)
 
-def decide_next_exploit(context: ToolContext, **kwargs: Any) -> Optional[str]:
-    """
-    Decides which exploit tool to run next based on the attack plan in state.
-    This function is intended to be used by a RouterAgent or similar mechanism.
+# Import global cache access
+try:
+    from google.adk.sessions.in_memory_session_service import _get_from_global_cache, _set_in_global_cache
+except ImportError:
+    # Define fallbacks if imports fail
+    def _get_from_global_cache(key, default=None):
+        print(f"[WARNING] Could not access global cache for key: {key}")
+        return default
 
+    def _set_in_global_cache(key, value):
+        print(f"[WARNING] Could not store in global cache for key: {key}")
+        return
+
+def get_global_state(context=None) -> Dict[str, Any]:
+    """
+    Get state either from context.session.state or from global cache as fallback.
+    
+    This function handles the case where context is None by using the global cache.
+    
     Args:
-        context (ToolContext): ADK ToolContext for accessing session state.
-        **kwargs: Catches any preceding output passed by ADK sequence.
-
+        context: The ToolContext object, which may be None
+        
     Returns:
-        Optional[str]: The name of the next agent/tool to execute 
-                       (e.g., 'Web Exploit Executor', 'SQL Exploit Executor'), 
-                       or None to signify moving to the default next step (reporting).
+        Dict containing state values
     """
-    logger.info("Routing exploits...")
-    attack_plan = None
+    state = {}
     
-    # First try to get attack plan from context
-    if hasattr(context, 'session') and hasattr(context.session, 'state'):
-        attack_plan = context.session.state.get('attack_plan')
+    # First try to get state from context if available
+    if context and hasattr(context, 'session') and hasattr(context.session, 'state'):
+        state = context.session.state
+        logger.info(f"Using state from context with {len(state)} keys")
+        return state
     
-    # If no attack plan in context, try global cache
-    if not attack_plan:
-        try:
-            from google.adk.sessions.in_memory_session_service import _get_from_global_cache
-            attack_plan = _get_from_global_cache('attack_plan')
-            logger.info("Retrieved attack plan from global cache")
-        except (ImportError, Exception) as e:
-            logger.warning(f"Could not access global cache: {e}")
-            
-    # Still no attack plan? Try emergency file cache
-    if not attack_plan:
+    # If context is not available, try to get state from emergency cache
+    logger.info(f"Context not available, using global cache fallback")
+    
+    # Get important keys from global cache
+    try:
+        # Try to get attack plan first
+        attack_plan = _get_from_global_cache('attack_plan')
+        if attack_plan:
+            state['attack_plan'] = attack_plan
+            logger.info(f"Retrieved attack_plan from global cache")
+    except Exception as e:
+        logger.warning(f"Error accessing global cache: {e}")
+    
+    # If state is still empty, try emergency file cache as last resort
+    if not state or 'attack_plan' not in state:
         try:
             import pickle
             import os
@@ -45,78 +62,105 @@ def decide_next_exploit(context: ToolContext, **kwargs: Any) -> Optional[str]:
             if os.path.exists(cache_file):
                 with open(cache_file, 'rb') as f:
                     attack_plan = pickle.load(f)
-                logger.info("Loaded attack plan from emergency cache file")
+                    state['attack_plan'] = attack_plan
+                    logger.info(f"Loaded attack_plan from emergency cache file")
         except Exception as e:
             logger.warning(f"Could not load attack plan from cache file: {e}")
+    
+    return state
 
-    # If still no valid attack plan, return None
-    if not isinstance(attack_plan, dict) or not attack_plan or attack_plan.get("error"):
-        logger.warning("No valid attack plan found. Skipping exploit phase.")
-        return None # Proceed to reporting
-
-    # Keep track of which exploits we've already attempted
-    attempted_exploits = set()
-    if hasattr(context, 'session') and hasattr(context.session, 'state'):
-        attempted_exploits = context.session.state.setdefault('attempted_exploits', set())
-
-    # Check for Web exploits if not already attempted
-    if 'Web Exploit Executor' not in attempted_exploits:
-        # Check for any web-related entries in attack plan
-        has_web = False
-        for k, v in attack_plan.items():
-            if k == 'web' or k.startswith('web_') or k == 'subdomains':
-                has_web = True
-                break
-                
-        if has_web:
-            logger.info("Routing to Web Exploit Executor.")
-            if hasattr(context, 'session') and hasattr(context.session, 'state'):
-                attempted_exploits.add('Web Exploit Executor')
-                context.session.state['attempted_exploits'] = attempted_exploits # Update state
-            return 'Web Exploit Executor' # Name must match the agent name in the main workflow
-
-    # Check for SQL exploits if not already attempted
-    if 'SQL Exploit Executor' not in attempted_exploits:
-        # Check for any SQL-related entries in attack plan
-        has_sql = False
-        for k, v in attack_plan.items():
-            if k == 'sql' or k.startswith('sql_') or k.startswith('database_'):
-                has_sql = True
-                break
-                
-        if has_sql:
-            logger.info("Routing to SQL Exploit Executor.")
-            if hasattr(context, 'session') and hasattr(context.session, 'state'):
-                attempted_exploits.add('SQL Exploit Executor')
-                context.session.state['attempted_exploits'] = attempted_exploits # Update state
-            return 'SQL Exploit Executor' # Name must match the agent name in the main workflow
-            
-    # Add checks for other exploit types (e.g., SSH) here...
-
-    # If all relevant planned exploits have been attempted, proceed to next step (report)
-    logger.info("All planned/attempted exploits routed. Proceeding to next step.")
-    return None 
-
-def simple_decide_next_exploit(**kwargs):
+def decide_next_exploit(context: ToolContext) -> str:
     """
-    A simplified wrapper for decide_next_exploit that helps ADK's automatic function calling.
+    Decide the next exploitation step based on the attack plan.
+    
+    Args:
+        context: The tool context with session state
+        
+    Returns:
+        The next exploitation step as a string ("ssh", "vulnscan", "webapp", "report")
+    """
+    # Get the attack plan from state
+    logging.info("Deciding next exploitation step based on attack plan")
+    state = get_global_state(context)
+    attack_plan = state.get('attack_plan')
+    
+    if attack_plan is None:
+        logging.warning("No attack plan found in state, proceeding to reporting")
+        return None
+        
+    # Handle the case where attack_plan is a string (JSON serialized)
+    logging.info(f"Attack plan type: {type(attack_plan)}")
+    logging.info(f"Attack plan value: {attack_plan}")
+    
+    if isinstance(attack_plan, str):
+        logging.warning("Attack plan is a string, attempting to parse as JSON")
+        try:
+            attack_plan = json.loads(attack_plan)
+            logging.info(f"Successfully parsed attack plan string as JSON")
+            logging.info(f"Parsed attack plan type: {type(attack_plan)}")
+        except json.JSONDecodeError as e:
+            logging.error(f"Failed to parse attack plan string as JSON: {str(e)}")
+            return None
+    
+    # Ensure attack_plan is a dictionary after parsing
+    if not isinstance(attack_plan, dict):
+        logging.error(f"Attack plan is not a dictionary: {type(attack_plan)}")
+        logging.error(f"Attack plan content: {attack_plan}")
+        return None
+            
+    # Get exploit results to check what's already been done
+    exploit_results = state.get('exploit_results', [])
+    if not isinstance(exploit_results, list):
+        exploit_results = [exploit_results]
+        
+    completed_exploits = set()
+    for result in exploit_results:
+        if isinstance(result, dict) and 'type' in result:
+            completed_exploits.add(result['type'])
+    
+    # Find the highest priority attack that hasn't been completed yet
+    highest_priority = -1
+    next_exploit = None
+    
+    for key, value in attack_plan.items():
+        # Skip non-exploit entries like "target" or "summary"
+        if key not in ['ssh_exploit', 'web_exploit', 'vuln_scan_exploit']:
+            continue
+            
+        # Convert the key to a simpler form for comparison
+        exploit_type = key.replace('_exploit', '')
+        
+        # Check if this exploit has been recommended and not yet completed
+        if value.get('recommended', False) and exploit_type not in completed_exploits:
+            priority = value.get('priority', 0)
+            if priority > highest_priority:
+                highest_priority = priority
+                next_exploit = exploit_type
+    
+    if next_exploit:
+        logging.info(f"Selected next exploitation step: {next_exploit}")
+        return next_exploit
+    else:
+        logging.info("No more exploitation steps to perform, proceeding to reporting")
+        return None
+
+def simple_decide_next_exploit(**kwargs: Any) -> Optional[str]:
+    """
+    Simplified wrapper for decide_next_exploit. Takes the same parameters.
     
     Returns:
-        The name of the next tool/agent to execute, or None
+        Optional[str]: The name of the next agent/tool to execute
+                      or None to move to reporting.
     """
-    print("[ROUTER] Using simplified router function")
+    logger.info("Using simplified router for exploitation")
     context = kwargs.get('context')
+    print(f"[ROUTER] Starting exploit routing...")
     
-    if not context:
-        print("[ROUTER] Context not provided, using emergency cache mechanism")
-        # Create a minimal context-like object with required attributes
-        class MinimalContext:
-            pass
-            
-        minimal_context = MinimalContext()
-        minimal_context.session = MinimalContext()
-        minimal_context.session.state = {}
-        
-        return decide_next_exploit(minimal_context)
+    if context:
+        print(f"[ROUTER] Context available for routing")
+        if hasattr(context, 'session') and hasattr(context.session, 'state'):
+            print(f"[ROUTER] State available with keys: {list(context.session.state.keys())}")
+    else:
+        print(f"[ROUTER] No context available for routing, using fallbacks")
     
     return decide_next_exploit(context) 
