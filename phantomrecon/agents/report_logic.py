@@ -426,7 +426,16 @@ def _build_markdown_report(recon_data: Dict, attack_plan: Dict, exploit_results:
     # attack_plan = context.session.state.get('attack_plan', {})
     # exploit_results = context.session.state.get('exploit_results', [])
     # report_summary = context.session.state.get('report_summary', {}) # Get LLM summary
-    target = recon_data.get('target', 'Unknown Target') # Use passed recon_data
+    
+    # Extract target from recon_data with fallbacks
+    target = "Unknown Target"
+    if isinstance(recon_data, dict):
+        # First try direct target key
+        if 'target' in recon_data:
+            target = recon_data.get('target')
+        # Then try nmap_scan.target if available
+        elif 'nmap_scan' in recon_data and isinstance(recon_data['nmap_scan'], dict):
+            target = recon_data['nmap_scan'].get('target', target)
     
     report = []
     report.append("# PhantomRecon Security Assessment Report")
@@ -451,10 +460,23 @@ def _build_markdown_report(recon_data: Dict, attack_plan: Dict, exploit_results:
     report.append("## 2. Reconnaissance Summary") # Renumbered
     # Access nmap data within the passed recon_data structure
     nmap_scan_data = recon_data.get("nmap_scan", {})
-    scan_results = nmap_scan_data.get("scan", {})
+    
+    # Handle the different possible structures
+    scan_results = {}
+    if 'scan' in nmap_scan_data:
+        # Standard nmap_scan.scan structure
+        scan_results = nmap_scan_data.get("scan", {})
+    elif isinstance(nmap_scan_data, dict) and any(isinstance(nmap_scan_data.get(k), dict) for k in nmap_scan_data.keys()):
+        # Alternative structure where scan results might be directly in nmap_scan_data
+        scan_results = nmap_scan_data
+    
     if scan_results:
         report.append("### Targets Scanned:")
         for host, data in scan_results.items():
+            # Skip non-dict entries that might be metadata
+            if not isinstance(data, dict):
+                continue
+                
             # Extract hostname if available
             hostname = "N/A"
             if data.get('hostnames') and isinstance(data['hostnames'], list) and data['hostnames']:
