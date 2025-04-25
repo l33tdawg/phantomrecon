@@ -846,9 +846,8 @@ def generate_final_report(context: ToolContext) -> Dict[str, Any]:
     # Get state using our helper function
     state = get_global_state(context)
     
-    # Extract data from state
-    nmap_results = state.get('nmap_results', {})
-    dns_results = state.get('dns_results', {})
+    # Extract data from state - use the correct key name 'aggregated_recon_data' instead of 'nmap_results'
+    recon_data = state.get('aggregated_recon_data', {})
     attack_plan = state.get('attack_plan', {})
     
     # Handle the case where attack_plan is a string (JSON serialized)
@@ -883,24 +882,31 @@ def generate_final_report(context: ToolContext) -> Dict[str, Any]:
             exploit_results = []
     
     # If we don't have recon data, try one more time to load from emergency file
-    if not nmap_results:
+    if not recon_data:
         try:
             import pickle
             recon_cache_file = 'recon_cache.pkl'
             if os.path.exists(recon_cache_file):
                 with open(recon_cache_file, 'rb') as f:
-                    nmap_results = pickle.load(f)
+                    recon_data = pickle.load(f)
                 print(f"[REPORT] Loaded recon from emergency cache file as last resort")
         except Exception as e:
             logging.error(f"Could not load recon data from emergency cache: {e}")
             print(f"[REPORT ERROR] No reconnaissance data available")
-            nmap_results = {"error": "No reconnaissance data available"}
+            recon_data = {"error": "No reconnaissance data available"}
     
-    # Determine the target
+    # Determine the target from recon_data
     target = "unknown"
-    if isinstance(nmap_results, dict):
-        target = nmap_results.get('target', "unknown")
     
+    # First check if 'target' is directly in recon_data
+    if isinstance(recon_data, dict):
+        target = recon_data.get('target', "unknown")
+        
+        # If target not found directly, check if it's in the 'nmap_scan' section
+        if target == "unknown" and 'nmap_scan' in recon_data:
+            target = recon_data['nmap_scan'].get('target', "unknown")
+            
+    # Use initial_target as fallback
     if target == "unknown" and 'initial_target' in state:
         target = state['initial_target']
         
@@ -910,7 +916,7 @@ def generate_final_report(context: ToolContext) -> Dict[str, Any]:
     summary_text = f"Security assessment for {target}"
     
     # Build the markdown report
-    report_content = _build_markdown_report(nmap_results, attack_plan, exploit_results, summary_text)
+    report_content = _build_markdown_report(recon_data, attack_plan, exploit_results, summary_text)
     
     # Save the report to a file in reports/ directory
     try:
@@ -984,10 +990,17 @@ def simple_generate_final_report(**kwargs):
                 context.session.state['attack_plan'] = attack_plan
                 print(f"[REPORT] Loaded attack_plan from global cache")
             
+            # Load recon data using the correct key name
+            aggregated_recon_data = _get_from_global_cache('aggregated_recon_data')
+            if aggregated_recon_data:
+                context.session.state['aggregated_recon_data'] = aggregated_recon_data
+                print(f"[REPORT] Loaded aggregated_recon_data from global cache")
+            
+            # Also try the alternative key name for backward compatibility
             recon = _get_from_global_cache('recon')
-            if recon:
-                context.session.state['recon'] = recon
-                print(f"[REPORT] Loaded recon from global cache")
+            if recon and not aggregated_recon_data:
+                context.session.state['aggregated_recon_data'] = recon
+                print(f"[REPORT] Loaded recon from global cache (using as aggregated_recon_data)")
                 
             initial_target = _get_from_global_cache('initial_target')
             if initial_target:
@@ -1015,8 +1028,9 @@ def simple_generate_final_report(**kwargs):
                     # Try to load recon data
                     if os.path.exists('recon_cache.pkl'):
                         with open('recon_cache.pkl', 'rb') as f:
-                            context.session.state['recon'] = pickle.load(f)
-                            print(f"[REPORT] Loaded recon from emergency file cache")
+                            recon_data = pickle.load(f)
+                            context.session.state['aggregated_recon_data'] = recon_data
+                            print(f"[REPORT] Loaded recon from emergency file cache as aggregated_recon_data")
                 except Exception as e:
                     print(f"[REPORT] Error loading from emergency cache: {e}")
             
