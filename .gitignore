@@ -130,8 +130,11 @@ cython_debug/
 
 # Project specific files
 @current-progress.md
+current-progress.md
 @multi-domain-enhancement-plan.md
+multi-domain-enhancement-plan.md
 @prd.md
+prd.md
 *.txt
 
 # Reports - exclude all except sample_report.md
