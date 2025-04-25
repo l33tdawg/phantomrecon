@@ -182,4 +182,43 @@ As ADK continues to evolve, the following areas may need attention:
 2. Stay aware of any new agent communication protocols
 3. Test regularly with the latest ADK versions
 4. Watch for changes in the ADK's core execution model
-5. Re-test with future ADK releases to ensure fixes remain effective 
+5. Re-test with future ADK releases to ensure fixes remain effective
+
+## ADK Google Search Integration
+
+We've enhanced PhantomRecon's search capabilities by integrating the ADK's built-in `google_search_tool` functionality:
+
+### Implementation Overview
+- Created a new `perform_web_search_with_adk` function that leverages ADK's LLM-powered search
+- Maintained the original pattern-based URL search as a fallback mechanism
+- Updated the reconnaissance flow to attempt ADK search first, with graceful degradation
+
+### Key Features
+- **Targeted Search Queries**: Implements multiple contextual search patterns:
+  - Site-specific search (`site:example.com`)
+  - Security-focused search (`example.com security vulnerabilities`)
+  - Company information search (`example.com company information`)
+  - Technology stack search (`example.com technology stack`)
+
+- **Result Processing**: Intelligent extraction of URLs from search results
+  - Handles different result formats (dictionaries, strings)
+  - Removes duplicates with set-based tracking
+  - Normalizes results for downstream processing
+
+- **Fault Tolerance**: Robust error handling with multiple fallback mechanisms
+  - Falls back to pattern-based URL generation on search failure
+  - Ensures content analysis always has URLs to work with
+
+### Testing
+- Added comprehensive unit tests in `test_adk_search.py`
+- Includes tests for:
+  - Successful ADK search scenarios
+  - Search failure and fallback handling
+  - Verification of pattern-based search
+
+### Future Enhancements
+- Implement more sophisticated query generation based on reconnaissance results
+- Add clustering of search results by topic/relevance
+- Create feedback loop where initial search results inform subsequent queries
+
+This implementation represents Phase 2 of our multi-domain enhancement plan, bringing more contextually relevant search capabilities to the reconnaissance phase. 

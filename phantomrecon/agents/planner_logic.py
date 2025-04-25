@@ -139,10 +139,12 @@ async def create_attack_plan(scan_data: Dict, context=None) -> Dict:
     try:
         # Create a basic attack plan based on scan data
         attack_plan = {
-            "web": {
+            "web_exploit": {
                 "version": "Apache", 
                 "port": 80,
                 "risk": "medium",
+                "recommended": True,
+                "priority": 10,
                 "tests": [
                     "check_default_files",
                     "test_for_directory_listing",

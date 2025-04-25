@@ -119,9 +119,9 @@ def decide_next_exploit(context: ToolContext) -> str:
     
     # Log the attack plan for debugging
     try:
-        logging.info(f"Attack plan content: {json.dumps(attack_plan, indent=2)}")
+        print(f"[ROUTER DEBUG] Attack plan: {json.dumps(attack_plan, indent=2)}")
     except:
-        logging.info(f"Attack plan content (non-serializable): {str(attack_plan)}")
+        print(f"[ROUTER DEBUG] Attack plan (non-serializable): {str(attack_plan)}")
     
     # Ensure attack_plan is a dictionary after parsing
     if not isinstance(attack_plan, dict):
@@ -152,55 +152,54 @@ def decide_next_exploit(context: ToolContext) -> str:
     for key in web_keys:
         if key in attack_plan:
             value = attack_plan[key]
-            if isinstance(value, dict) and value.get('recommended', False) and 'web' not in completed_exploits:
-                priority = value.get('priority', 0)
-                if priority > highest_priority:
-                    highest_priority = priority
-                    next_exploit = 'web'
+            print(f"[ROUTER DEBUG] Found web key: {key}, value: {value}")
+            if isinstance(value, dict):
+                # Check if recommended flag exists and is True, or default to True if not present
+                recommended = value.get('recommended', True)  # Default to True if not specified
+                if recommended and 'web' not in completed_exploits:
+                    priority = value.get('priority', 5)  # Default priority of 5
+                    if priority > highest_priority:
+                        highest_priority = priority
+                        next_exploit = 'web'
+                        print(f"[ROUTER DEBUG] Selected web exploit with priority {priority}")
     
     # Try to find SSH exploit plans
     for key in ssh_keys:
         if key in attack_plan:
             value = attack_plan[key]
-            if isinstance(value, dict) and value.get('recommended', False) and 'ssh' not in completed_exploits:
-                priority = value.get('priority', 0)
-                if priority > highest_priority:
-                    highest_priority = priority
-                    next_exploit = 'ssh'
+            print(f"[ROUTER DEBUG] Found SSH key: {key}, value: {value}")
+            if isinstance(value, dict):
+                # Default to True if recommended is not specified
+                recommended = value.get('recommended', True)
+                if recommended and 'ssh' not in completed_exploits:
+                    priority = value.get('priority', 5)
+                    if priority > highest_priority:
+                        highest_priority = priority
+                        next_exploit = 'ssh'
+                        print(f"[ROUTER DEBUG] Selected SSH exploit with priority {priority}")
     
     # Try to find SQL exploit plans
     for key in sql_keys:
         if key in attack_plan:
             value = attack_plan[key]
-            if isinstance(value, dict) and value.get('recommended', False) and 'sql' not in completed_exploits:
-                priority = value.get('priority', 0)
-                if priority > highest_priority:
-                    highest_priority = priority
-                    next_exploit = 'sql'
+            print(f"[ROUTER DEBUG] Found SQL key: {key}, value: {value}")
+            if isinstance(value, dict):
+                # Default to True if recommended is not specified
+                recommended = value.get('recommended', True)
+                if recommended and 'sql' not in completed_exploits:
+                    priority = value.get('priority', 5)
+                    if priority > highest_priority:
+                        highest_priority = priority
+                        next_exploit = 'sql'
+                        print(f"[ROUTER DEBUG] Selected SQL exploit with priority {priority}")
     
-    # If still no exploit found, use the old approach of looking for specific keys
-    if next_exploit is None:
-        for key, value in attack_plan.items():
-            # Skip non-exploit entries like "target" or "summary"
-            if key not in ['ssh_exploit', 'web_exploit', 'vuln_scan_exploit', 'sql_exploit']:
-                continue
-                
-            # Convert the key to a simpler form for comparison
-            exploit_type = key.replace('_exploit', '')
-            
-            # Check if this exploit has been recommended and not yet completed
-            if (isinstance(value, dict) and 
-                value.get('recommended', False) and 
-                exploit_type not in completed_exploits):
-                priority = value.get('priority', 0)
-                if priority > highest_priority:
-                    highest_priority = priority
-                    next_exploit = exploit_type
-    
+    # If we found an exploit, return it
     if next_exploit:
+        print(f"[ROUTER] Selected next exploitation step: {next_exploit}")
         logging.info(f"Selected next exploitation step: {next_exploit}")
         return next_exploit
     else:
+        print(f"[ROUTER] No exploitation steps found in attack plan, proceeding to reporting")
         logging.info("No more exploitation steps to perform, proceeding to reporting")
         return None
 
