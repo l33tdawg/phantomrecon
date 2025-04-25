@@ -839,6 +839,7 @@ def generate_final_report(context: ToolContext) -> Dict[str, Any]:
         A dictionary containing the final report
     """
     logging.info("Generating final report...")
+    import json  # Add the missing import for json module
     
     # Get state using our helper function
     state = get_global_state(context)

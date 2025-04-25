@@ -54,7 +54,6 @@ def get_global_state(context=None) -> Dict[str, Any]:
             if isinstance(attack_plan, str):
                 try:
                     # Try to parse it as JSON
-                    import json
                     parsed_plan = json.loads(attack_plan)
                     attack_plan = parsed_plan
                     logger.info(f"Successfully parsed attack_plan string from global cache as JSON")
@@ -81,7 +80,6 @@ def get_global_state(context=None) -> Dict[str, Any]:
                     if isinstance(attack_plan, str):
                         try:
                             # Try to parse it as JSON
-                            import json
                             parsed_plan = json.loads(attack_plan)
                             attack_plan = parsed_plan
                             logger.info(f"Successfully parsed attack_plan string from cache file as JSON")
@@ -106,7 +104,6 @@ def get_global_state(context=None) -> Dict[str, Any]:
                     if isinstance(plan_data, str):
                         try:
                             # Try to parse it as JSON
-                            import json
                             parsed_plan = json.loads(plan_data)
                             plan_data = parsed_plan
                             logger.info(f"Successfully parsed plan string from alternate key {key} as JSON")

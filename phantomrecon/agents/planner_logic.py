@@ -124,6 +124,7 @@ async def create_attack_plan(scan_data: Dict, context=None) -> Dict:
               or {"error": ...} if planning fails or scan_data is invalid.
     """
     logger.info("Creating attack plan from scan data.")
+    import json  # Add the missing json import
     
     # Validate scan data
     if not isinstance(scan_data, dict):
@@ -280,6 +281,7 @@ async def simple_create_attack_plan(**kwargs):
     """
     
     print("[PLANNER] Starting plan creation....")
+    import json  # Add the missing json import
     
     # Extract context from kwargs
     context = kwargs.get('context')
