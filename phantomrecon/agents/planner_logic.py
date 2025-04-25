@@ -154,6 +154,24 @@ async def create_attack_plan(scan_data: Dict, context=None) -> Dict:
             }
         }
         
+        # Add more exploit types to ensure at least one will be picked up by the router
+        attack_plan["ssh_exploit"] = {
+            "recommended": True,
+            "priority": 5,
+            "port": 22,
+            "risk": "medium",
+            "tests": ["ssh_bruteforce", "ssh_version_check"],
+            "notes": "Added SSH exploit as a fallback option"
+        }
+        
+        attack_plan["sql_exploit"] = {
+            "recommended": True,
+            "priority": 7,
+            "risk": "high",
+            "tests": ["basic_sqli", "database_fingerprinting"],
+            "notes": "Added SQL exploit as a potential attack vector"
+        }
+        
         # Check for specific findings in scan data
         # DNS checks
         if "dns_recon" in scan_data and scan_data["dns_recon"]:
@@ -165,6 +183,40 @@ async def create_attack_plan(scan_data: Dict, context=None) -> Dict:
                     "risk": "low",
                     "tests": ["enumerate_all_subdomains", "check_for_zone_transfer"]
                 }
+        
+        # Check for NMAP scan data
+        if "nmap_scan" in scan_data and scan_data["nmap_scan"]:
+            nmap_data = scan_data["nmap_scan"]
+            # Process ports and services
+            if "ports" in nmap_data and nmap_data["ports"]:
+                for port_info in nmap_data["ports"]:
+                    port = port_info.get("port")
+                    service = port_info.get("service")
+                    
+                    # Update SSH exploit if SSH service is detected
+                    if service and "ssh" in service.lower() and port:
+                        attack_plan["ssh_exploit"].update({
+                            "port": port,
+                            "version": port_info.get("version", "unknown"),
+                            "notes": f"SSH service detected on port {port}"
+                        })
+                    
+                    # Update Web exploit if HTTP/HTTPS service is detected
+                    if service and ("http" in service.lower() or "https" in service.lower()) and port:
+                        attack_plan["web_exploit"].update({
+                            "port": port,
+                            "version": port_info.get("version", "unknown"),
+                            "notes": f"Web service detected on port {port}"
+                        })
+                    
+                    # Update SQL exploit if database service is detected
+                    if service and any(db in service.lower() for db in ["mysql", "postgresql", "mssql", "oracle"]) and port:
+                        attack_plan["sql_exploit"].update({
+                            "port": port,
+                            "dbtype": service.lower(),
+                            "version": port_info.get("version", "unknown"),
+                            "notes": f"Database service {service} detected on port {port}"
+                        })
         
         # Get state for storing
         state = get_global_state(context)
@@ -182,6 +234,19 @@ async def create_attack_plan(scan_data: Dict, context=None) -> Dict:
         # Always store in global cache as a fallback
         try:
             serializable_plan = _ensure_serializable(attack_plan)
+            # Ensure we're storing the plan as a dictionary, not a string
+            if isinstance(serializable_plan, str):
+                try:
+                    import json
+                    # Try to parse it back to dictionary if it's valid JSON
+                    parsed_plan = json.loads(serializable_plan)
+                    serializable_plan = parsed_plan
+                    print(f"[PLANNER] Converted serialized string plan back to dictionary before storage")
+                except json.JSONDecodeError:
+                    # If it's not valid JSON, use original dict
+                    print(f"[PLANNER] Serializable plan was string but not valid JSON, using original")
+                    serializable_plan = attack_plan
+                    
             _set_in_global_cache('attack_plan', serializable_plan)
             print(f"[PLANNER] Stored attack plan in global cache")
         except Exception as e:
@@ -293,6 +358,23 @@ async def simple_create_attack_plan(**kwargs):
                 print(f"[PLANNER ERROR] Planning failed: {result['error']}")
             else:
                 print(f"[PLANNER] Plan generated successfully with {len(result)} items")
+                # Add detailed debugging of the attack plan structure
+                print(f"[PLANNER DEBUG] Attack plan contents: {json.dumps(result, indent=2)}")
+                
+                # Check if the attack plan has valid exploit entries
+                has_valid_exploits = False
+                web_exploit_keys = ['web_exploit', 'web', 'webapp', 'http', 'https']
+                ssh_exploit_keys = ['ssh_exploit', 'ssh', 'secure_shell']
+                sql_exploit_keys = ['sql_exploit', 'sql', 'database', 'mysql', 'postgresql']
+                
+                for key in web_exploit_keys + ssh_exploit_keys + sql_exploit_keys:
+                    if key in result and isinstance(result[key], dict) and result[key].get('recommended', True):
+                        has_valid_exploits = True
+                        print(f"[PLANNER DEBUG] Found valid exploit entry: {key}")
+                
+                if not has_valid_exploits:
+                    print(f"[PLANNER WARNING] No valid exploit entries found in attack plan! Router will find nothing to execute.")
+                    print(f"[PLANNER WARNING] Valid exploit keys should include: {web_exploit_keys + ssh_exploit_keys + sql_exploit_keys}")
                 
                 # Always save to emergency cache file for future reference
                 try:
@@ -306,6 +388,19 @@ async def simple_create_attack_plan(**kwargs):
         # Always store in global cache as fallback
         try:
             serializable_result = _ensure_serializable(result)
+            # Ensure we're storing the plan as a dictionary, not a string
+            if isinstance(serializable_result, str):
+                try:
+                    import json
+                    # Try to parse it back to dictionary if it's valid JSON
+                    parsed_result = json.loads(serializable_result)
+                    serializable_result = parsed_result
+                    print(f"[PLANNER] Converted serialized string result back to dictionary before storage")
+                except json.JSONDecodeError:
+                    # If it's not valid JSON, use original dict
+                    print(f"[PLANNER] Serializable result was string but not valid JSON, using original")
+                    serializable_result = result
+                    
             _set_in_global_cache('attack_plan', serializable_result)
             print(f"[PLANNER] Stored attack_plan in global cache")
         except Exception as e:

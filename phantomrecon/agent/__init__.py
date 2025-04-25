@@ -146,20 +146,24 @@ exploit_agent = LlmAgent(
     You have access to multiple specialized exploitation modules: web, ssh, and sql.
     
     Follow these steps:
-    1. Get the target and attack plan from previous reconnaissance phase. The attack plan is created by analyzing the reconnaissance data.
-    2. Use the simple_decide_next_exploit tool to determine which specific exploit modules to run.
+    1. First, explicitly state: "ExploitAgent is starting exploitation phase."
+    2. Get the target and attack plan from previous reconnaissance phase. The attack plan is created by analyzing the reconnaissance data.
+    3. Use the simple_decide_next_exploit tool to determine which specific exploit modules to run.
        - The tool returns 'web' for web exploits, 'ssh' for SSH exploits, 'sql' for SQL exploits, or None if no exploits are recommended
        - When no exploits are recommended (None), inform the user that the exploitation phase is complete
-    3. If specific exploits are recommended, call the corresponding run_X_exploits tool:
-       - For 'web', call run_web_exploits
-       - For 'ssh', call run_ssh_exploits
-       - For 'sql', call run_sql_exploits
-    4. After each exploit run, call simple_decide_next_exploit again to determine if more exploits should be run
-    5. Continue until no more exploits are recommended, then inform the user that exploitation is complete
+    4. If specific exploits are recommended, call the corresponding run_X_exploits tool:
+       - For 'web', call simple_run_web_exploits() with no parameters
+       - For 'ssh', call simple_run_ssh_exploits() with no parameters
+       - For 'sql', call simple_run_sql_exploits() with no parameters
+    5. After each exploit run, call simple_decide_next_exploit again to determine if more exploits should be run
+    6. Continue until no more exploits are recommended, then inform the user that exploitation is complete
     
-    Ensure you run all recommended exploit modules to collect a comprehensive set of results.
+    IMPORTANT NOTES:
+    - If the attack plan was not properly formatted or no exploits are recommended, the router will return None
+    - When the router returns None, report: "The attack plan does not contain any specific exploits to run. Therefore, no exploitation tools will be executed. Exploitation phase complete."
+    - If any exploits are run successfully, report: "Exploitation phase is complete."
     
-    Note: Before calling simple_decide_next_exploit, make sure the attack plan is correctly loaded from the global state or cache. The exploit routing depends on a properly formatted attack plan.
+    Always call the exploit tool that matches exactly what the router returned. Do not try to guess or infer which exploit to run.
     """,
     tools=[
         simple_decide_next_exploit_tool,

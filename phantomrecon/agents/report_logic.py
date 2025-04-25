@@ -60,9 +60,25 @@ def get_global_state(context=None) -> Dict:
             state['attack_plan'] = attack_plan
             print(f"[REPORT-STATE] Retrieved attack_plan from global cache")
             
-        # Try to get exploit results
+        # Try to get exploit results first
         exploit_results = _get_from_global_cache('exploit_results')
         if exploit_results:
+            # Handle the case where exploit_results is a string
+            if isinstance(exploit_results, str):
+                try:
+                    import json
+                    parsed_results = json.loads(exploit_results)
+                    if isinstance(parsed_results, list):
+                        exploit_results = parsed_results
+                        print(f"[REPORT-STATE] Successfully parsed exploit_results string from global cache as JSON list")
+                    else:
+                        # If it's valid JSON but not a list, use an empty list
+                        exploit_results = []
+                except json.JSONDecodeError as e:
+                    # If it's not valid JSON, use an empty list
+                    print(f"[REPORT-STATE] Retrieved exploit_results as string but not valid JSON: {e}")
+                    exploit_results = []
+                    
             state['exploit_results'] = exploit_results
             print(f"[REPORT-STATE] Retrieved exploit_results from global cache")
     except Exception as e:
@@ -847,7 +863,21 @@ def generate_final_report(context: ToolContext) -> Dict[str, Any]:
     if not isinstance(exploit_results, list):
         logging.warning("exploit_results is not a list. Converting to empty list.")
         print(f"[REPORT WARNING] exploit_results has invalid type: {type(exploit_results)}. Using empty list instead.")
-        exploit_results = []
+        
+        # Try to parse it if it's a string
+        if isinstance(exploit_results, str):
+            try:
+                import json
+                parsed_results = json.loads(exploit_results)
+                if isinstance(parsed_results, list):
+                    exploit_results = parsed_results
+                    print(f"[REPORT] Successfully parsed exploit_results string as JSON list")
+                else:
+                    exploit_results = []
+            except json.JSONDecodeError:
+                exploit_results = []
+        else:
+            exploit_results = []
     
     # If we don't have recon data, try one more time to load from emergency file
     if not nmap_results:

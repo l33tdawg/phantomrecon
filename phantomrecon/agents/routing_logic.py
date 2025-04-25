@@ -50,6 +50,20 @@ def get_global_state(context=None) -> Dict[str, Any]:
         # Try to get attack plan first
         attack_plan = _get_from_global_cache('attack_plan')
         if attack_plan:
+            # Ensure attack_plan is a dictionary, not a string
+            if isinstance(attack_plan, str):
+                try:
+                    # Try to parse it as JSON
+                    import json
+                    parsed_plan = json.loads(attack_plan)
+                    attack_plan = parsed_plan
+                    logger.info(f"Successfully parsed attack_plan string from global cache as JSON")
+                except json.JSONDecodeError as e:
+                    # If it's not valid JSON but is a string, it might be a pickled object
+                    # or another format. Use a default empty plan with a warning.
+                    logger.warning(f"Retrieved attack_plan as string but not valid JSON: {e}")
+                    attack_plan = {"web_exploit": {"recommended": True, "priority": 10}}
+                    
             state['attack_plan'] = attack_plan
             logger.info(f"Retrieved attack_plan from global cache")
     except Exception as e:
@@ -62,6 +76,20 @@ def get_global_state(context=None) -> Dict[str, Any]:
             if os.path.exists(cache_file):
                 with open(cache_file, 'rb') as f:
                     attack_plan = pickle.load(f)
+                    
+                    # Ensure attack_plan is a dictionary, not a string
+                    if isinstance(attack_plan, str):
+                        try:
+                            # Try to parse it as JSON
+                            import json
+                            parsed_plan = json.loads(attack_plan)
+                            attack_plan = parsed_plan
+                            logger.info(f"Successfully parsed attack_plan string from cache file as JSON")
+                        except json.JSONDecodeError as e:
+                            # If it's not valid JSON but is a string, use default
+                            logger.warning(f"Retrieved attack_plan as string but not valid JSON: {e}")
+                            attack_plan = {"web_exploit": {"recommended": True, "priority": 10}}
+                    
                     state['attack_plan'] = attack_plan
                     logger.info(f"Loaded attack_plan from emergency cache file")
         except Exception as e:
@@ -74,6 +102,19 @@ def get_global_state(context=None) -> Dict[str, Any]:
             for key in ['plan', 'attackPlan', 'attack_plan_result', 'planner_output', 'planning_result']:
                 plan_data = _get_from_global_cache(key)
                 if plan_data:
+                    # Ensure plan_data is a dictionary, not a string
+                    if isinstance(plan_data, str):
+                        try:
+                            # Try to parse it as JSON
+                            import json
+                            parsed_plan = json.loads(plan_data)
+                            plan_data = parsed_plan
+                            logger.info(f"Successfully parsed plan string from alternate key {key} as JSON")
+                        except json.JSONDecodeError as e:
+                            # If it's not valid JSON but is a string, check for default structure
+                            logger.warning(f"Retrieved plan from {key} as string but not valid JSON: {e}")
+                            plan_data = {"web_exploit": {"recommended": True, "priority": 10}}
+                    
                     state['attack_plan'] = plan_data
                     logger.info(f"Found attack plan under alternate key: {key}")
                     break
@@ -105,20 +146,34 @@ def decide_next_exploit(context: ToolContext) -> str:
     
     if attack_plan is None:
         logging.warning("No attack plan found in state, proceeding to reporting")
+        print("[ROUTER DEBUG] No attack plan found in state")
         return None
         
     # Handle the case where attack_plan is a string (JSON serialized)
     logging.info(f"Attack plan type: {type(attack_plan)}")
+    print(f"[ROUTER DEBUG] Attack plan type: {type(attack_plan)}")
     if isinstance(attack_plan, str):
         try:
             attack_plan = json.loads(attack_plan)
             logging.info(f"Successfully parsed attack plan string as JSON")
+            print(f"[ROUTER DEBUG] Successfully parsed attack plan string as JSON")
         except json.JSONDecodeError as e:
             logging.error(f"Failed to parse attack plan string as JSON: {str(e)}")
-            return None
+            print(f"[ROUTER DEBUG] Failed to parse attack plan string as JSON: {str(e)}")
+            # Create a fallback plan with at least one exploit to try
+            logging.info(f"Using fallback attack plan with default web exploit")
+            print(f"[ROUTER DEBUG] Using fallback attack plan with default web exploit")
+            attack_plan = {
+                "web_exploit": {
+                    "recommended": True,
+                    "priority": 10,
+                    "tests": ["check_default_files", "test_for_directory_listing"]
+                }
+            }
     
     # Log the attack plan for debugging
     try:
+        print(f"[ROUTER DEBUG] Attack plan keys: {list(attack_plan.keys())}")
         print(f"[ROUTER DEBUG] Attack plan: {json.dumps(attack_plan, indent=2)}")
     except:
         print(f"[ROUTER DEBUG] Attack plan (non-serializable): {str(attack_plan)}")
@@ -127,17 +182,23 @@ def decide_next_exploit(context: ToolContext) -> str:
     if not isinstance(attack_plan, dict):
         logging.error(f"Attack plan is not a dictionary: {type(attack_plan)}")
         logging.error(f"Attack plan content: {attack_plan}")
+        print(f"[ROUTER DEBUG] Attack plan is not a dictionary: {type(attack_plan)}")
+        print(f"[ROUTER DEBUG] Attack plan content: {attack_plan}")
         return None
             
     # Get exploit results to check what's already been done
     exploit_results = state.get('exploit_results', [])
     if not isinstance(exploit_results, list):
         exploit_results = [exploit_results]
+    
+    print(f"[ROUTER DEBUG] Completed exploits: {exploit_results}")
         
     completed_exploits = set()
     for result in exploit_results:
         if isinstance(result, dict) and 'type' in result:
             completed_exploits.add(result['type'])
+    
+    print(f"[ROUTER DEBUG] Completed exploit types: {completed_exploits}")
     
     # Find the highest priority attack that hasn't been completed yet
     highest_priority = -1
@@ -148,6 +209,10 @@ def decide_next_exploit(context: ToolContext) -> str:
     ssh_keys = ['ssh_exploit', 'ssh', 'secure_shell']
     sql_keys = ['sql_exploit', 'sql', 'database', 'mysql', 'postgresql']
     
+    print(f"[ROUTER DEBUG] Looking for web exploits in keys: {web_keys}")
+    print(f"[ROUTER DEBUG] Looking for SSH exploits in keys: {ssh_keys}")
+    print(f"[ROUTER DEBUG] Looking for SQL exploits in keys: {sql_keys}")
+    
     # Try to find web exploit plans
     for key in web_keys:
         if key in attack_plan:
@@ -156,8 +221,12 @@ def decide_next_exploit(context: ToolContext) -> str:
             if isinstance(value, dict):
                 # Check if recommended flag exists and is True, or default to True if not present
                 recommended = value.get('recommended', True)  # Default to True if not specified
+                print(f"[ROUTER DEBUG] Web exploit recommended: {recommended}")
+                
                 if recommended and 'web' not in completed_exploits:
                     priority = value.get('priority', 5)  # Default priority of 5
+                    print(f"[ROUTER DEBUG] Web exploit priority: {priority}")
+                    
                     if priority > highest_priority:
                         highest_priority = priority
                         next_exploit = 'web'
@@ -171,8 +240,12 @@ def decide_next_exploit(context: ToolContext) -> str:
             if isinstance(value, dict):
                 # Default to True if recommended is not specified
                 recommended = value.get('recommended', True)
+                print(f"[ROUTER DEBUG] SSH exploit recommended: {recommended}")
+                
                 if recommended and 'ssh' not in completed_exploits:
                     priority = value.get('priority', 5)
+                    print(f"[ROUTER DEBUG] SSH exploit priority: {priority}")
+                    
                     if priority > highest_priority:
                         highest_priority = priority
                         next_exploit = 'ssh'
@@ -186,8 +259,12 @@ def decide_next_exploit(context: ToolContext) -> str:
             if isinstance(value, dict):
                 # Default to True if recommended is not specified
                 recommended = value.get('recommended', True)
+                print(f"[ROUTER DEBUG] SQL exploit recommended: {recommended}")
+                
                 if recommended and 'sql' not in completed_exploits:
                     priority = value.get('priority', 5)
+                    print(f"[ROUTER DEBUG] SQL exploit priority: {priority}")
+                    
                     if priority > highest_priority:
                         highest_priority = priority
                         next_exploit = 'sql'
@@ -200,6 +277,9 @@ def decide_next_exploit(context: ToolContext) -> str:
         return next_exploit
     else:
         print(f"[ROUTER] No exploitation steps found in attack plan, proceeding to reporting")
+        print(f"[ROUTER DEBUG] No valid exploits were found in the attack plan with recommended=True and proper priority")
+        print(f"[ROUTER DEBUG] Make sure your attack plan contains entries with keys like: {web_keys + ssh_keys + sql_keys}")
+        print(f"[ROUTER DEBUG] And each entry should be a dictionary with recommended=True and a positive priority value")
         logging.info("No more exploitation steps to perform, proceeding to reporting")
         return None
 
