@@ -1189,3 +1189,43 @@ def _generate_html_report(md_content: str, html_path: str):
     except Exception as e:
         print(f"[REPORT] Error generating HTML report: {str(e)}")
         return {"status": "error", "message": str(e)} 
+
+def _report_misconfigurations(misconfigurations_data):
+    """Formats misconfiguration findings into the report."""
+    report = []
+    
+    if not misconfigurations_data or "findings" not in misconfigurations_data or not misconfigurations_data["findings"]:
+        report.append("- No misconfiguration issues found")
+        return report
+    
+    findings = misconfigurations_data["findings"]
+    
+    # Group findings by subtype
+    findings_by_subtype = {}
+    for finding in findings:
+        subtype = finding.get("subtype", "unknown")
+        if subtype not in findings_by_subtype:
+            findings_by_subtype[subtype] = []
+        findings_by_subtype[subtype].append(finding)
+    
+    # Report findings by subtype
+    for subtype, subtype_findings in findings_by_subtype.items():
+        if subtype == "directory_listing":
+            report.append("- **Directory Listing Enabled**")
+            report.append("  - Description: Server is configured to display file and directory listings when no index file is present.")
+            report.append("  - Risk: Directory listings can expose sensitive files and information about the server structure.")
+            report.append("  - Findings:")
+            
+            for finding in subtype_findings:
+                report.append(f"    - URL: {finding.get('url')}")
+                # Ensure path is included and displayed
+                if finding.get('path'):
+                    report.append(f"      - Directory Path: `{finding.get('path')}`")
+                report.append(f"      - {finding.get('message')}")
+            
+            report.append("  - Recommendation: Disable directory listing in the web server configuration.")
+            report.append("")
+        
+        # Add other misconfiguration types here
+        
+    return report 
