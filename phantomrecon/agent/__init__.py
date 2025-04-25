@@ -97,7 +97,7 @@ recon_agent = LlmAgent(
     instruction="""Your task is to perform reconnaissance on the target provided in the session state key 'initial_target'.
 1. First, explicitly mention the target you found in the session state. For example: "Starting reconnaissance on target: example.com" 
 2. IMPORTANT: If you can't find a target in the session state, look at the user's most recent message to infer the target.
-   For example, if the user said "hitb.org", use that as the target directly.
+   For example, if the user said "example.com", use that as the target directly.
 3. Use the perform_parallel_recon tool to run all reconnaissance methods (nmap, dns, web search) concurrently.
    This tool automatically runs everything in parallel and combines the results.
 4. When calling the tool, ALWAYS explicitly pass the target as a parameter to ensure it receives the correct value:
