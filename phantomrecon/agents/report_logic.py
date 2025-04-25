@@ -792,6 +792,8 @@ def _build_markdown_report(recon_data: Dict, attack_plan: Dict, exploit_results:
                                 elif test_name == 'misconfigurations' and finding.get('type') == 'misconfiguration':
                                      report.append(f"    - **Misconfiguration ({finding.get('subtype','N/A')}):** {finding.get('message')}")
                                      report.append(f"      - URL: `{finding.get('url')}`")
+                                     if finding.get('path'):
+                                         report.append(f"      - Directory Path: `{finding.get('path')}`")
 
                                 # Default generic format for other dict findings
                                 else:

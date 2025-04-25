@@ -110,6 +110,74 @@ def get_global_state(context=None) -> Dict[str, Any]:
     
     return state
 
+def _standardize_attack_plan(attack_plan):
+    """
+    Ensures the attack plan is always in a standard format.
+    
+    Args:
+        attack_plan: The attack plan in any format
+        
+    Returns:
+        A standardized attack plan dictionary
+    """
+    # Handle None case
+    if attack_plan is None:
+        logger.warning("Received None attack plan, creating standard structure")
+        return {
+            "web_exploit": {
+                "recommended": True,
+                "priority": 10,
+                "tests": ["check_default_files", "test_for_directory_listing"]
+            }
+        }
+        
+    # Handle string case (possibly JSON)
+    if isinstance(attack_plan, str):
+        try:
+            parsed = json.loads(attack_plan)
+            logger.info("Successfully parsed attack plan from JSON string")
+            return _standardize_attack_plan(parsed)  # Recursive call to check the parsed result
+        except json.JSONDecodeError as e:
+            logger.warning(f"Failed to parse attack plan as JSON: {e}")
+            return {
+                "web_exploit": {
+                    "recommended": True,
+                    "priority": 10,
+                    "tests": ["check_default_files", "test_for_directory_listing"]
+                }
+            }
+    
+    # Handle dictionary case
+    if isinstance(attack_plan, dict):
+        # Check if it has the expected structure
+        has_valid_exploit = False
+        for key in ['web_exploit', 'ssh_exploit', 'sql_exploit', 'web', 'ssh', 'sql']:
+            if key in attack_plan and isinstance(attack_plan[key], dict):
+                has_valid_exploit = True
+                break
+                
+        if has_valid_exploit:
+            return attack_plan
+        else:
+            logger.warning("Attack plan dictionary doesn't have any valid exploit keys, creating standard structure")
+            return {
+                "web_exploit": {
+                    "recommended": True,
+                    "priority": 10,
+                    "tests": ["check_default_files", "test_for_directory_listing"]
+                }
+            }
+    
+    # Handle any other unexpected type
+    logger.warning(f"Attack plan has unexpected type: {type(attack_plan)}, creating standard structure")
+    return {
+        "web_exploit": {
+            "recommended": True,
+            "priority": 10,
+            "tests": ["check_default_files", "test_for_directory_listing"]
+        }
+    }
+
 async def create_attack_plan(scan_data: Dict, context=None) -> Dict:
     """
     Create an attack plan based on reconnaissance data using a simple string prompt.
@@ -124,7 +192,6 @@ async def create_attack_plan(scan_data: Dict, context=None) -> Dict:
               or {"error": ...} if planning fails or scan_data is invalid.
     """
     logger.info("Creating attack plan from scan data.")
-    import json  # Add the missing json import
     
     # Validate scan data
     if not isinstance(scan_data, dict):
@@ -222,34 +289,22 @@ async def create_attack_plan(scan_data: Dict, context=None) -> Dict:
         # Get state for storing
         state = get_global_state(context)
         
+        # Ensure plan is consistently formatted before storing anywhere
+        # Standardize the attack plan to ensure it's always a valid dictionary
+        standardized_plan = _standardize_attack_plan(attack_plan)
+        
         # Store in session state if context is available
         if context and hasattr(context, 'session') and hasattr(context.session, 'state'):
             try:
-                # Ensure the attack plan is serializable before storing
-                serializable_plan = _ensure_serializable(attack_plan)
-                context.session.state['attack_plan'] = serializable_plan
-                print(f"[PLANNER] Stored attack plan in session state")
+                context.session.state['attack_plan'] = standardized_plan
+                print(f"[PLANNER] Stored standardized attack plan in session state")
             except Exception as e:
                 logger.warning(f"Failed to store attack plan in session state: {e}")
         
         # Always store in global cache as a fallback
         try:
-            serializable_plan = _ensure_serializable(attack_plan)
-            # Ensure we're storing the plan as a dictionary, not a string
-            if isinstance(serializable_plan, str):
-                try:
-                    import json
-                    # Try to parse it back to dictionary if it's valid JSON
-                    parsed_plan = json.loads(serializable_plan)
-                    serializable_plan = parsed_plan
-                    print(f"[PLANNER] Converted serialized string plan back to dictionary before storage")
-                except json.JSONDecodeError:
-                    # If it's not valid JSON, use original dict
-                    print(f"[PLANNER] Serializable plan was string but not valid JSON, using original")
-                    serializable_plan = attack_plan
-                    
-            _set_in_global_cache('attack_plan', serializable_plan)
-            print(f"[PLANNER] Stored attack plan in global cache")
+            _set_in_global_cache('attack_plan', standardized_plan)
+            print(f"[PLANNER] Stored standardized attack plan in global cache")
         except Exception as e:
             logger.warning(f"Failed to store in global cache: {e}")
         
@@ -257,12 +312,12 @@ async def create_attack_plan(scan_data: Dict, context=None) -> Dict:
         try:
             import pickle
             with open('plan_cache.pkl', 'wb') as f:
-                pickle.dump(attack_plan, f)
-            print(f"[PLANNER] Saved plan to emergency cache file")
+                pickle.dump(standardized_plan, f)
+            print(f"[PLANNER] Saved standardized plan to emergency cache file")
         except Exception as e:
             print(f"[PLANNER] Warning: Could not save plan to cache: {e}")
             
-        return attack_plan
+        return standardized_plan
         
     except Exception as e:
         logger.error(f"Error creating attack plan: {e}")

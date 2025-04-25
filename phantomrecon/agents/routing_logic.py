@@ -22,6 +22,74 @@ except ImportError:
         print(f"[WARNING] Could not store in global cache for key: {key}")
         return
 
+def _standardize_attack_plan(attack_plan):
+    """
+    Ensures the attack plan is always in a standard format.
+    
+    Args:
+        attack_plan: The attack plan in any format
+        
+    Returns:
+        A standardized attack plan dictionary
+    """
+    # Handle None case
+    if attack_plan is None:
+        logger.warning("Received None attack plan, creating standard structure")
+        return {
+            "web_exploit": {
+                "recommended": True,
+                "priority": 10,
+                "tests": ["check_default_files", "test_for_directory_listing"]
+            }
+        }
+        
+    # Handle string case (possibly JSON)
+    if isinstance(attack_plan, str):
+        try:
+            parsed = json.loads(attack_plan)
+            logger.info("Successfully parsed attack plan from JSON string")
+            return _standardize_attack_plan(parsed)  # Recursive call to check the parsed result
+        except json.JSONDecodeError as e:
+            logger.warning(f"Failed to parse attack plan as JSON: {e}")
+            return {
+                "web_exploit": {
+                    "recommended": True,
+                    "priority": 10,
+                    "tests": ["check_default_files", "test_for_directory_listing"]
+                }
+            }
+    
+    # Handle dictionary case
+    if isinstance(attack_plan, dict):
+        # Check if it has the expected structure
+        has_valid_exploit = False
+        for key in ['web_exploit', 'ssh_exploit', 'sql_exploit', 'web', 'ssh', 'sql']:
+            if key in attack_plan and isinstance(attack_plan[key], dict):
+                has_valid_exploit = True
+                break
+                
+        if has_valid_exploit:
+            return attack_plan
+        else:
+            logger.warning("Attack plan dictionary doesn't have any valid exploit keys, creating standard structure")
+            return {
+                "web_exploit": {
+                    "recommended": True,
+                    "priority": 10,
+                    "tests": ["check_default_files", "test_for_directory_listing"]
+                }
+            }
+    
+    # Handle any other unexpected type
+    logger.warning(f"Attack plan has unexpected type: {type(attack_plan)}, creating standard structure")
+    return {
+        "web_exploit": {
+            "recommended": True,
+            "priority": 10,
+            "tests": ["check_default_files", "test_for_directory_listing"]
+        }
+    }
+
 def get_global_state(context=None) -> Dict[str, Any]:
     """
     Get state either from context.session.state or from global cache as fallback.
@@ -40,6 +108,12 @@ def get_global_state(context=None) -> Dict[str, Any]:
     if context and hasattr(context, 'session') and hasattr(context.session, 'state'):
         state = context.session.state
         logger.info(f"Using state from context with {len(state)} keys: {list(state.keys())}")
+        
+        # If attack_plan exists in state, ensure it's in standardized format
+        if 'attack_plan' in state:
+            state['attack_plan'] = _standardize_attack_plan(state['attack_plan'])
+            logger.info("Standardized attack plan in context state")
+            
         return state
     
     # If context is not available, try to get state from emergency cache
@@ -50,21 +124,10 @@ def get_global_state(context=None) -> Dict[str, Any]:
         # Try to get attack plan first
         attack_plan = _get_from_global_cache('attack_plan')
         if attack_plan:
-            # Ensure attack_plan is a dictionary, not a string
-            if isinstance(attack_plan, str):
-                try:
-                    # Try to parse it as JSON
-                    parsed_plan = json.loads(attack_plan)
-                    attack_plan = parsed_plan
-                    logger.info(f"Successfully parsed attack_plan string from global cache as JSON")
-                except json.JSONDecodeError as e:
-                    # If it's not valid JSON but is a string, it might be a pickled object
-                    # or another format. Use a default empty plan with a warning.
-                    logger.warning(f"Retrieved attack_plan as string but not valid JSON: {e}")
-                    attack_plan = {"web_exploit": {"recommended": True, "priority": 10}}
-                    
-            state['attack_plan'] = attack_plan
-            logger.info(f"Retrieved attack_plan from global cache")
+            # Standardize the attack plan
+            standardized_plan = _standardize_attack_plan(attack_plan)
+            state['attack_plan'] = standardized_plan
+            logger.info(f"Retrieved and standardized attack_plan from global cache")
     except Exception as e:
         logger.warning(f"Error accessing global cache: {e}")
     
@@ -75,21 +138,10 @@ def get_global_state(context=None) -> Dict[str, Any]:
             if os.path.exists(cache_file):
                 with open(cache_file, 'rb') as f:
                     attack_plan = pickle.load(f)
-                    
-                    # Ensure attack_plan is a dictionary, not a string
-                    if isinstance(attack_plan, str):
-                        try:
-                            # Try to parse it as JSON
-                            parsed_plan = json.loads(attack_plan)
-                            attack_plan = parsed_plan
-                            logger.info(f"Successfully parsed attack_plan string from cache file as JSON")
-                        except json.JSONDecodeError as e:
-                            # If it's not valid JSON but is a string, use default
-                            logger.warning(f"Retrieved attack_plan as string but not valid JSON: {e}")
-                            attack_plan = {"web_exploit": {"recommended": True, "priority": 10}}
-                    
-                    state['attack_plan'] = attack_plan
-                    logger.info(f"Loaded attack_plan from emergency cache file")
+                    # Standardize the attack plan
+                    standardized_plan = _standardize_attack_plan(attack_plan)
+                    state['attack_plan'] = standardized_plan
+                    logger.info(f"Loaded and standardized attack_plan from emergency cache file")
         except Exception as e:
             logger.warning(f"Could not load attack plan from cache file: {e}")
     
@@ -100,20 +152,10 @@ def get_global_state(context=None) -> Dict[str, Any]:
             for key in ['plan', 'attackPlan', 'attack_plan_result', 'planner_output', 'planning_result']:
                 plan_data = _get_from_global_cache(key)
                 if plan_data:
-                    # Ensure plan_data is a dictionary, not a string
-                    if isinstance(plan_data, str):
-                        try:
-                            # Try to parse it as JSON
-                            parsed_plan = json.loads(plan_data)
-                            plan_data = parsed_plan
-                            logger.info(f"Successfully parsed plan string from alternate key {key} as JSON")
-                        except json.JSONDecodeError as e:
-                            # If it's not valid JSON but is a string, check for default structure
-                            logger.warning(f"Retrieved plan from {key} as string but not valid JSON: {e}")
-                            plan_data = {"web_exploit": {"recommended": True, "priority": 10}}
-                    
-                    state['attack_plan'] = plan_data
-                    logger.info(f"Found attack plan under alternate key: {key}")
+                    # Standardize the attack plan
+                    standardized_plan = _standardize_attack_plan(plan_data)
+                    state['attack_plan'] = standardized_plan
+                    logger.info(f"Found and standardized attack plan under alternate key: {key}")
                     break
         except Exception as e:
             logger.warning(f"Error checking alternate plan keys: {e}")
@@ -122,7 +164,9 @@ def get_global_state(context=None) -> Dict[str, Any]:
     if 'attack_plan' in state:
         logger.info(f"Successfully retrieved attack plan via fallback mechanisms")
     else:
-        logger.warning(f"Failed to find attack plan through any method")
+        # Create a standard attack plan as a last resort
+        state['attack_plan'] = _standardize_attack_plan(None)
+        logger.warning(f"Failed to find attack plan through any method, created standard plan")
         
     return state
 
@@ -141,32 +185,13 @@ def decide_next_exploit(context: ToolContext) -> str:
     state = get_global_state(context)
     attack_plan = state.get('attack_plan')
     
-    if attack_plan is None:
-        logging.warning("No attack plan found in state, proceeding to reporting")
-        print("[ROUTER DEBUG] No attack plan found in state")
-        return None
-        
-    # Handle the case where attack_plan is a string (JSON serialized)
-    logging.info(f"Attack plan type: {type(attack_plan)}")
-    print(f"[ROUTER DEBUG] Attack plan type: {type(attack_plan)}")
-    if isinstance(attack_plan, str):
-        try:
-            attack_plan = json.loads(attack_plan)
-            logging.info(f"Successfully parsed attack plan string as JSON")
-            print(f"[ROUTER DEBUG] Successfully parsed attack plan string as JSON")
-        except json.JSONDecodeError as e:
-            logging.error(f"Failed to parse attack plan string as JSON: {str(e)}")
-            print(f"[ROUTER DEBUG] Failed to parse attack plan string as JSON: {str(e)}")
-            # Create a fallback plan with at least one exploit to try
-            logging.info(f"Using fallback attack plan with default web exploit")
-            print(f"[ROUTER DEBUG] Using fallback attack plan with default web exploit")
-            attack_plan = {
-                "web_exploit": {
-                    "recommended": True,
-                    "priority": 10,
-                    "tests": ["check_default_files", "test_for_directory_listing"]
-                }
-            }
+    # We should always have a valid attack plan from get_global_state
+    # but double-check to be certain
+    attack_plan = _standardize_attack_plan(attack_plan)
+    
+    # Store the standardized attack plan back to session if context is available
+    if context and hasattr(context, 'session') and hasattr(context.session, 'state'):
+        context.session.state['attack_plan'] = attack_plan
     
     # Log the attack plan for debugging
     try:
@@ -174,14 +199,6 @@ def decide_next_exploit(context: ToolContext) -> str:
         print(f"[ROUTER DEBUG] Attack plan: {json.dumps(attack_plan, indent=2)}")
     except:
         print(f"[ROUTER DEBUG] Attack plan (non-serializable): {str(attack_plan)}")
-    
-    # Ensure attack_plan is a dictionary after parsing
-    if not isinstance(attack_plan, dict):
-        logging.error(f"Attack plan is not a dictionary: {type(attack_plan)}")
-        logging.error(f"Attack plan content: {attack_plan}")
-        print(f"[ROUTER DEBUG] Attack plan is not a dictionary: {type(attack_plan)}")
-        print(f"[ROUTER DEBUG] Attack plan content: {attack_plan}")
-        return None
             
     # Get exploit results to check what's already been done
     exploit_results = state.get('exploit_results', [])
