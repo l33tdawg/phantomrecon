@@ -786,9 +786,9 @@ def _build_markdown_report(recon_data: Dict, attack_plan: Dict, exploit_results:
                                           report.append(f"      - Identified Point(s):")
                                           for point in finding['identified_points']:
                                                report.append(f"        - `{point}`")
-                                     # Optionally include sqlmap output snippet
-                                     # if finding.get('sqlmap_output_snippet'):
-                                     #      report.append(f"      - Sqlmap Output Snippet:\n```\n{finding['sqlmap_output_snippet']}\n```")
+                                     # Include sqlmap output snippet (uncommented)
+                                     if finding.get('sqlmap_output_snippet'):
+                                          report.append(f"      - Sqlmap Output Snippet:\n```\n{finding['sqlmap_output_snippet']}\n```")
 
                                 # Specific formatting for Basic Reflected XSS
                                 elif test_name == 'xss_reflected_basic' and finding.get('type') == 'potential_reflected_xss':
@@ -809,13 +809,19 @@ def _build_markdown_report(recon_data: Dict, attack_plan: Dict, exploit_results:
                                 elif test_name == 'default_files' and finding.get('type') == 'potential_info_leak':
                                      report.append(f"    - **Accessible Default Path:** `{finding.get('path')}` (Status: {finding.get('status_code')})")
                                      report.append(f"      - URL: `{finding.get('url')}`")
-                                     
+                                     if finding.get('content_snippet'):
+                                          report.append(f"      - Content Snippet:\n```\n{finding['content_snippet'][:500]}...\n```")
+                                 
                                 # Specific formatting for misconfigurations check (dir listing)
                                 elif test_name == 'misconfigurations' and finding.get('type') == 'misconfiguration':
                                      report.append(f"    - **Misconfiguration ({finding.get('subtype','N/A')}):** {finding.get('message')}")
                                      report.append(f"      - URL: `{finding.get('url')}`")
                                      if finding.get('path'):
-                                         report.append(f"      - Directory Path: `{finding.get('path')}`")
+                                          report.append(f"      - Directory Path: `{finding.get('path')}`")
+                                     if finding.get('details'):
+                                          report.append(f"      - Details: `{finding.get('details')}`")
+                                     if finding.get('content_sample'):
+                                          report.append(f"      - Sample Content:\n```\n{finding.get('content_sample')[:500]}...\n```")
 
                                 # Default generic format for other dict findings
                                 else:
