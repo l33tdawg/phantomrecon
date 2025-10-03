@@ -72,12 +72,16 @@ def interactive_console():
 
     def banner():
         art = f"""
-{MAGENTA}{BOLD}   ____  _                _                 ____                        
-  |  _ \| | __ _ _ __ | |_ ___  _ __    |  _ \ ___  ___ ___  _ __   
-  | |_) | |/ _` | '_ \| __/ _ \| '_ \   | |_) / _ \/ __/ _ \| '_ \  
-  |  __/| | (_| | | | | || (_) | | | |  |  _ <  __/ (_| (_) | | | | 
-  |_|   |_|\__,_|_| |_|\__\___/|_| |_|  |_| \_\___|\___\___/|_| |_| {RESET}
-{CYAN}          Agentic Recon Orchestrator • {orchestrator_agent.name}{RESET}
+{MAGENTA}{BOLD}
+  ____  _                     _                         
+ |  _ \| |__   __ _ _ __ ___ | |__   _ __ ___   ___     
+ | |_) | '_ \ / _` | '_ ` _ \| '_ \ | '_ ` _ \ / _ \    
+ |  __/| | | | (_| | | | | | | |_) || | | | | |  __/    
+ |_|   |_| |_|\__,_|_| |_| |_|_.__/ |_| |_| |_|\___|    
+
+            PHANTOMRECON
+{RESET}
+{CYAN}Agentic Recon Orchestrator • {orchestrator_agent.name}{RESET}
         """
         print(art)
 
