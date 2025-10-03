@@ -14,6 +14,8 @@ import os as _os
 agent = None
 if not _os.environ.get('PHANTOMRECON_NO_IMPORT_AGENT'):
     from .agent import orchestrator_agent as agent
+    # Provide `root_agent` alias for ADK runner discovery as well
+    from .agent import orchestrator_agent as root_agent
 
 import logging
 logger = logging.getLogger(__name__)

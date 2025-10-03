@@ -332,5 +332,7 @@ IMPORTANT:
 
 # Export orchestrator as the primary ADK entrypoint
 agent = orchestrator_agent
+# Alias for ADK discovery: some loaders expect `root_agent`
+root_agent = orchestrator_agent
 
 logger.info("PhantomRecon Orchestrator initialized with BuiltInPlanner.")
