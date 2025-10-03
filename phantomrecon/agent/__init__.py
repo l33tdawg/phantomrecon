@@ -4,6 +4,7 @@ from google.adk.agents import Agent, LlmAgent, SequentialAgent
 from google.adk.planners import BuiltInPlanner
 from google.genai import types as genai_types
 from google.adk.tools import FunctionTool
+from google.adk.tools.google_search_tool import GoogleSearchTool
 import logging
 import json
 import os
@@ -110,6 +111,8 @@ recon_agent = LlmAgent(
         # Keep individual tools as fallbacks
         perform_nmap_scan_tool,
         perform_dns_recon_tool,
+        # Enable built-in Google Search within the model
+        GoogleSearchTool(),
     ],
     output_key="recon_results", # Store the final summary/status
     description="Performs parallel reconnaissance on the target from state['initial_target']."

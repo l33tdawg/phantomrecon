@@ -104,14 +104,30 @@ async def perform_nmap_scan(**kwargs) -> Dict[str, Any]:
         # Assume it's a domain name
         pass
         
-    # Construct basic scan command  
-    scan_args = ['-sV', '-Pn', '--top-ports', '1000']
+    # Construct scan command from environment
+    env_top_ports = os.getenv('NMAP_TOP_PORTS', '1000').strip()
+    env_extra_args = os.getenv('NMAP_ARGS', '').strip()
+    env_timeout = int(os.getenv('NMAP_TIMEOUT', '90'))
+    env_disable = os.getenv('NMAP_DISABLE', '0').strip() in ('1', 'true', 'True')
+
+    if env_disable:
+        logger.warning("Nmap disabled via NMAP_DISABLE env var")
+        return {"scan": {}, "warning": "Nmap disabled via env", "command": None}
+
+    # Base args
+    scan_args = ['-sV', '-Pn', '--top-ports', env_top_ports]
+    # Extra args
+    if env_extra_args:
+        try:
+            scan_args.extend(shlex.split(env_extra_args))
+        except Exception:
+            scan_args.extend(env_extra_args.split())
     
     command = ['nmap'] + scan_args + [target]
     command_str = ' '.join(command)
-    print(f"[NMAP] Running command: {command_str}")
+    print(f"[NMAP] Running command: {command_str} (timeout={env_timeout}s)")
     
-    stdout, stderr, returncode = await _run_command_async(command, timeout=90)
+    stdout, stderr, returncode = await _run_command_async(command, timeout=env_timeout)
     
     if returncode != 0:
         logger.error(f"Nmap scan failed for {target}: {stderr}")
@@ -350,10 +366,36 @@ async def analyze_web_content(**kwargs) -> Dict[str, Any]:
         print(f"[DEBUG-ANALYSIS] web_search_results: {context.session.state.get('web_search_results') is not None}")
         print(f"[DEBUG-ANALYSIS] State Type: {type(context.session.state)}")
     
-    # Get search results from session state, if available
+    # Get search results or seed URLs if missing
     search_results = None
+    seeded_urls: List[str] = []
     if context and hasattr(context, 'session') and hasattr(context.session, 'state'):
-        search_results = context.session.state.get('web_search_results', {})
+        state = context.session.state
+        search_results = state.get('web_search_results', {})
+        # Seed URLs when no search results
+        if not search_results:
+            target = state.get('initial_target')
+            if isinstance(target, str) and target:
+                bases = [
+                    f"http://{target}",
+                    f"https://{target}",
+                    f"http://www.{target}",
+                    f"https://www.{target}"
+                ]
+                # Include discovered subdomains
+                dns = state.get('dns_recon_results') or {}
+                for sub in (dns.get('subdomains') or []):
+                    name = sub.get('name') if isinstance(sub, dict) else None
+                    if isinstance(name, str):
+                        bases.extend([f"http://{name}", f"https://{name}"])
+                common_paths = [
+                    '/', '/login', '/admin', '/robots.txt', '/.git/HEAD', '/.env', '/wp-login.php'
+                ]
+                for base in bases:
+                    for p in common_paths:
+                        seeded_urls.append(base.rstrip('/') + p)
+            if seeded_urls:
+                print(f"[ANALYSIS] Seeded {len(seeded_urls)} URLs for analysis (no search results)")
     
     print(f"[ANALYSIS] Starting web content analysis...")
     
@@ -365,21 +407,16 @@ async def analyze_web_content(**kwargs) -> Dict[str, Any]:
         "results": []
     }
     
-    # Check if we have search results to work with
-    if not search_results or not isinstance(search_results, dict):
-        logger.warning("No valid web search results found in state for analysis")
-        print(f"[ANALYSIS] Error: No valid web search results found")
-        analysis_results["error"] = "No valid web search results found in state"
-        
-        return analysis_results
-    
-    # Extract URLs from search results
-    urls = search_results.get('results', [])
+    # Build URL list from search results or seeds
+    urls: List[str] = []
+    if isinstance(search_results, dict):
+        urls = search_results.get('results', []) or []
+    if not urls and seeded_urls:
+        urls = seeded_urls
     if not urls:
-        logger.warning("No URLs found in web search results for analysis")
-        print(f"[ANALYSIS] Error: No URLs found in web search results")
-        analysis_results["error"] = "No URLs found in web search results"
-        
+        logger.warning("No URLs available for analysis (no search results and no seeds)")
+        print(f"[ANALYSIS] Error: No URLs available for analysis")
+        analysis_results["error"] = "No URLs available for analysis"
         return analysis_results
     
     # Set up the HTTP session with appropriate headers
