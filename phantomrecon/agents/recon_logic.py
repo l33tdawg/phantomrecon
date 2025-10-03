@@ -6,7 +6,11 @@ import os
 import logging
 import subprocess
 import shlex
-from google.adk.tools import ToolContext # Import ToolContext
+try:
+    from google.adk.tools import ToolContext  # Import ToolContext when available
+except Exception:
+    class ToolContext:  # Fallback placeholder for local smoke tests
+        pass
 from bs4 import BeautifulSoup, Comment # Import BeautifulSoup and Comment
 import re # For finding comments
 from urllib.parse import urlparse # Import urlparse
@@ -23,28 +27,8 @@ from phantomrecon.executor_fix import run_command, run_command_detailed
 from google.adk.code_executors import UnsafeLocalCodeExecutor
 import aiohttp
 import asyncio
-from google.adk.tools import google_search_tool # Import ADK Google Search 
-# Import the actual google_search function which should be callable
-try:
-    from google.adk.tools.google_search_tool import google_search, GoogleSearchTool
-except ImportError:
-    # Define a fallback if the import fails
-    def google_search(query):
-        print(f"[WARNING] google_search function not available, query: {query}")
-        return []
-    GoogleSearchTool = None
-# Import global cache access
-try:
-    from google.adk.sessions.in_memory_session_service import _get_from_global_cache, _set_in_global_cache
-except ImportError:
-    # Define fallbacks if imports fail
-    def _get_from_global_cache(key, default=None):
-        print(f"[WARNING] Could not access global cache for key: {key}")
-        return default
-
-    def _set_in_global_cache(key, value):
-        print(f"[WARNING] Could not store in global cache for key: {key}")
-        return
+# ADK now provides GoogleSearchTool internally to Gemini; no direct import/usage here
+# Remove custom global cache fallbacks; rely on context.session.state throughout
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -338,143 +322,10 @@ async def _run_command_detailed_async(command: str, timeout: int = 15) -> Tuple[
 # --- Web Search and Analysis --- 
 
 # Define our own search function that doesn't depend on the ADK's GoogleSearchTool
-def _fallback_search(query):
-    """
-    Fallback search function that generates search results based on the query.
-    This is used when the ADK's google_search function is not available or not working.
-    """
-    print(f"[SEARCH] Using fallback search for query: {query}")
-    
-    # Extract domain from query if it's a site-specific search
-    domain = None
-    if query.startswith("site:"):
-        domain = query[5:].strip()
-    elif "security vulnerabilities" in query or "company information" in query or "technology stack" in query:
-        # Extract domain from other query types
-        parts = query.split()
-        if parts and "." in parts[0]:
-            domain = parts[0]
-            
-    if not domain:
-        return []
-        
-    # Generate pattern-based URLs for this domain
-    results = [
-        {"title": f"{domain} - Homepage", "link": f"https://{domain}"},
-        {"title": f"{domain} - About", "link": f"https://{domain}/about"},
-        {"title": f"{domain} - Contact", "link": f"https://{domain}/contact"},
-        {"title": f"www.{domain}", "link": f"https://www.{domain}"},
-    ]
-    
-    return results
+# Remove legacy fallback search; search is either handled by ADK or omitted
 
 # Import ADK Google Search
-async def perform_web_search_with_adk(**kwargs) -> Dict[str, Any]:
-    """
-    Performs a web search using ADK's LLM capabilities for more contextually relevant results.
-    
-    Returns:
-        Dict[str, Any]: Search results.
-    """
-    # Extract context from kwargs
-    context = kwargs.get('context')
-    
-    # Debug state
-    if context and hasattr(context, 'session') and hasattr(context.session, 'state'):
-        print(f"[DEBUG-ADK-SEARCH] State Keys: {list(context.session.state.keys())}")
-        print(f"[DEBUG-ADK-SEARCH] initial_target: {context.session.state.get('initial_target')}")
-    
-    # Check for direct target override from parallel function
-    direct_target = kwargs.get('direct_target_override')
-    if direct_target:
-        print(f"[ADK-SEARCH] Using direct target override: {direct_target}")
-        target = direct_target
-    else:
-        # Extract target from session state
-        target = None
-        if context and hasattr(context, 'session') and hasattr(context.session, 'state'):
-            target = context.session.state.get('initial_target')
-    
-    # If no target is found, return an error
-    if not target:
-        error_msg = "No target specified for web search. Please provide a target domain or IP address."
-        logger.error(error_msg)
-        results = {
-            "error": error_msg,
-            "search_query": "",
-            "results": [],
-            "status": "error"
-        }
-        return results
-    
-    logger.info(f"Starting ADK web search for target: {target}")
-    print(f"[ADK-SEARCH] Starting search for {target}...")
-    
-    # Create search queries
-    search_queries = [
-        f"site:{target}",  # Main site-specific search
-        f"{target} security vulnerabilities",  # Security-focused search
-        f"{target} company information",  # Company info search
-        f"{target} technology stack",  # Tech stack search
-    ]
-    
-    # Initialize results list
-    all_results = []
-    urls_found = set()  # Track unique URLs to avoid duplicates
-    
-    # Unfortunately, we can't directly use the GoogleSearchTool in this way.
-    # The GoogleSearchTool is designed to be used internally by Gemini models,
-    # not directly called. It modifies LLM requests to enable search, 
-    # but doesn't have a direct search interface.
-    
-    print(f"[ADK-SEARCH] Using fallback search mechanism (web API)")
-    
-    # Try to import the external search module
-    try:
-        from googlesearch import search as google_search_api
-        
-        # Use the googlesearch-python library instead
-        for query in search_queries:
-            try:
-                print(f"[ADK-SEARCH] Executing web search for query: {query}")
-                # Use the library to perform a search (adjust parameters as needed)
-                search_results = list(google_search_api(query, num_results=5))
-                
-                if search_results:
-                    print(f"[ADK-SEARCH] Found {len(search_results)} results for query: {query}")
-                    
-                    # Add unique URLs to our results
-                    for url in search_results:
-                        if url and url not in urls_found:
-                            urls_found.add(url)
-                            all_results.append(url)
-                else:
-                    print(f"[ADK-SEARCH] No results returned for query: {query}")
-                    
-            except Exception as e:
-                logger.error(f"Error using web search for query '{query}': {e}")
-                print(f"[ADK-SEARCH] Error using web search for query '{query}': {e}")
-    
-    except ImportError:
-        print(f"[ADK-SEARCH] googlesearch-python library not available, using pattern-based URLs")
-        # Generate pattern-based URLs for reliability
-        all_results = [
-            f"https://{target}",
-            f"https://www.{target}",
-            f"https://{target}/about",
-            f"https://{target}/contact",
-        ]
-    
-    results = {
-        "target": target,
-        "search_queries": search_queries,
-        "results": all_results,
-        "status": "completed"
-    }
-
-    print(f"[ADK-SEARCH] Search completed, found {len(all_results)} unique URLs")
-    logger.info(f"Generated {len(all_results)} URLs for analysis")
-    return results
+# Remove web search function; ADK search is internal and not directly used by tools
 
 # Removed ToolContext type hint for LlmAgent compatibility
 async def analyze_web_content(**kwargs) -> Dict[str, Any]:
@@ -501,12 +352,7 @@ async def analyze_web_content(**kwargs) -> Dict[str, Any]:
     
     # Get search results from session state, if available
     search_results = None
-    # First check if we were provided web_result directly in kwargs (from parallel recon)
-    if 'web_result' in kwargs and isinstance(kwargs['web_result'], dict):
-        print(f"[ANALYSIS] Using web search results provided directly in kwargs")
-        search_results = kwargs['web_result']
-    # Otherwise try to get it from session state
-    elif context and hasattr(context, 'session') and hasattr(context.session, 'state'):
+    if context and hasattr(context, 'session') and hasattr(context.session, 'state'):
         search_results = context.session.state.get('web_search_results', {})
     
     print(f"[ANALYSIS] Starting web content analysis...")
@@ -973,47 +819,10 @@ def get_global_state(context=None) -> Dict[str, Any]:
         print(f"[STATE] Using state from context with {len(state)} keys")
         return state
     
-    # If context is not available, try to get state from emergency cache
-    print(f"[STATE] Context not available, using global cache fallback")
-    
-    # Get important keys from global cache
-    try:
-        target = _get_from_global_cache('initial_target')
-        if target:
-            state['initial_target'] = target
-            print(f"[STATE] Retrieved initial_target from global cache: {target}")
-    except Exception as e:
-        print(f"[WARNING] Error accessing global cache: {e}")
-    
-    # If state is still empty, try emergency file cache as last resort
-    if not state:
-        try:
-            import pickle
-            cache_file = 'recon_cache.pkl'
-            if os.path.exists(cache_file):
-                with open(cache_file, 'rb') as f:
-                    recon_data = pickle.load(f)
-                    # Extract target from recon data if available
-                    if 'target' in recon_data:
-                        state['initial_target'] = recon_data['target']
-                        print(f"[STATE] Retrieved initial_target from cache file: {state['initial_target']}")
-                    # Store full recon data
-                    state['recon'] = recon_data
-                    print(f"[STATE] Loaded {len(recon_data)} keys from cache file")
-        except Exception as e:
-            print(f"[WARNING] Could not load from emergency cache file: {e}")
-    
+    # No fallback: ADK sessions provide state; if absent, return empty
     return state
 
-async def perform_web_search(**kwargs) -> Dict[str, Any]:
-    """
-    Redirects to the ADK's LLM-based search function instead of using pattern-based search.
-    
-    Returns:
-        Dict[str, Any]: Search results from the LLM-based search.
-    """
-    print(f"[WEB] Redirecting to LLM-based search...")
-    return await perform_web_search_with_adk(**kwargs)
+# Removed perform_web_search wrapper; not needed with updated ADK
 
 async def perform_parallel_recon(**kwargs) -> Dict[str, Any]:
     """
@@ -1120,50 +929,13 @@ async def perform_parallel_recon(**kwargs) -> Dict[str, Any]:
     # Create tasks for all recon methods with the enriched kwargs
     print("[INFO] Launching NMAP scan, DNS reconnaissance, and web search in parallel...")
     
-    # First try the ADK Google Search (newer method)
-    try:
-        print("[INFO] Attempting to use search functionality...")
-        web_result = await perform_web_search_with_adk(**modified_kwargs)
-        
-        # Check if we got any results back
-        if web_result.get("results"):
-            print("[SUCCESS] Web search completed successfully with results")
-        else:
-            print("[WARNING] Web search returned no results but didn't fail")
-            # Continue with empty results rather than raising an exception
-            
-        # Set up the tasks with the search results (even if empty)
-        tasks = [
-            asyncio.create_task(perform_nmap_scan(**modified_kwargs)),
-            asyncio.create_task(perform_dns_recon(**modified_kwargs)),
-        ]
-        
-        # Run nmap and dns tasks concurrently
-        print("[INFO] Waiting for NMAP and DNS reconnaissance tasks to complete...")
-        nmap_result, dns_result = await asyncio.gather(*tasks, return_exceptions=True)
-        
-    except Exception as e:
-        # Better error handling with specific error message
-        print(f"[ERROR] Web search functionality failed: {e}")
-        print("[INFO] Continuing with NMAP and DNS reconnaissance...")
-        
-        # Still run the NMAP and DNS tasks
-        tasks = [
-            asyncio.create_task(perform_nmap_scan(**modified_kwargs)),
-            asyncio.create_task(perform_dns_recon(**modified_kwargs)),
-        ]
-        
-        # Run NMAP and DNS tasks concurrently without web search
-        print("[INFO] Waiting for NMAP and DNS reconnaissance tasks to complete...")
-        nmap_result, dns_result = await asyncio.gather(*tasks, return_exceptions=True)
-        
-        # Set web_result to an error with a more specific message
-        web_result = {
-            "error": f"Web search failed: {str(e)}",
-            "results": [],
-            "status": "error",
-            "target": target
-        }
+    # Run NMAP and DNS tasks concurrently (web search is handled by LLM if needed)
+    tasks = [
+        asyncio.create_task(perform_nmap_scan(**modified_kwargs)),
+        asyncio.create_task(perform_dns_recon(**modified_kwargs)),
+    ]
+    print("[INFO] Waiting for NMAP and DNS reconnaissance tasks to complete...")
+    nmap_result, dns_result = await asyncio.gather(*tasks, return_exceptions=True)
     
     # Set up the results structure
     results = {
@@ -1190,35 +962,25 @@ async def perform_parallel_recon(**kwargs) -> Dict[str, Any]:
         print(f"[SUCCESS] DNS reconnaissance completed successfully")
         results["dns_recon"] = dns_result
     
-    # Process web search results
-    if isinstance(web_result, Exception):
-        logger.error(f"Web search failed: {web_result}")
-        print(f"[ERROR] Web search failed: {web_result}")
-        results["web_search"] = {"error": f"Web search failed: {str(web_result)}"}
-    else:
-        print(f"[SUCCESS] Web search completed successfully")
-        results["web_search"] = web_result
+    # No web_search in results; rely on analysis of known URLs if any are in state
     
-    # If web search succeeded, also trigger web content analysis
-    # Pass context to analyze_web_content
+    # Optionally run web content analysis if URLs are already present in state
     try:
-        print("[INFO] Starting web content analysis...")
-        # Create a new kwargs with the web_result directly included
-        web_analysis_kwargs = modified_kwargs.copy()
-        web_analysis_kwargs['web_result'] = web_result
-        web_analysis = await analyze_web_content(**web_analysis_kwargs)
-        print("[SUCCESS] Web content analysis completed successfully")
-        results["web_analysis"] = web_analysis
+        print("[INFO] Starting web content analysis (if URLs present)...")
+        web_analysis = await analyze_web_content(**modified_kwargs)
+        if web_analysis and isinstance(web_analysis, dict) and web_analysis.get('status') != 'error':
+            print("[SUCCESS] Web content analysis completed successfully")
+            results["web_analysis"] = web_analysis
     except Exception as e:
         logger.error(f"Web content analysis failed: {e}")
         print(f"[ERROR] Web content analysis failed: {e}")
         results["web_analysis"] = {"error": f"Analysis failed: {str(e)}"}
     
     # Update overall status
-    success_count = sum(1 for r in [nmap_result, dns_result, web_result] 
+    success_count = sum(1 for r in [nmap_result, dns_result]
                         if not isinstance(r, Exception))
     
-    if success_count == 3:
+    if success_count == 2:
         results["status"] = "completed"
         print(f"[INFO] All reconnaissance tasks completed successfully")
     elif success_count == 0:
@@ -1244,10 +1006,7 @@ async def perform_parallel_recon(**kwargs) -> Dict[str, Any]:
                 context.session.state['dns_recon_results'] = serializable_dns
                 print(f"[STATE] Stored dns_recon_results in session state")
             
-            if not isinstance(web_result, Exception):
-                serializable_web = _ensure_serializable(web_result)
-                context.session.state['web_search_results'] = serializable_web
-                print(f"[STATE] Stored web_search_results in session state")
+            # No web_result handling here
             
             # Store web analysis results if available
             if "web_analysis" in results and (not isinstance(results["web_analysis"], dict) or not results["web_analysis"].get("error")):
@@ -1258,6 +1017,8 @@ async def perform_parallel_recon(**kwargs) -> Dict[str, Any]:
             # Store the combined results in 'recon'
             serializable_results = _ensure_serializable(results)
             context.session.state['recon'] = serializable_results
+            # Also store under 'aggregated_recon_data' for report compatibility
+            context.session.state['aggregated_recon_data'] = serializable_results
             logger.debug("Stored combined recon results in session state.")
             print("[INFO] Combined reconnaissance results stored in session state")
             
@@ -1272,66 +1033,11 @@ async def perform_parallel_recon(**kwargs) -> Dict[str, Any]:
                 print(f"[VERIFY] 'recon' is NOT in state after attempted save!")
                 
         except Exception as e:
-            # Add detailed logging for the exception
-            logger.exception(f"Detailed error storing state:") 
+            # Log but don't attempt deprecated global cache/file fallbacks
+            logger.exception("Error storing combined recon in session state")
             print(f"[WARNING] Error storing in session state: {e}")
-            # Try global cache as fallback
-            try:
-                serializable_results = _ensure_serializable(results)
-                _set_in_global_cache('recon', serializable_results)
-                print(f"[STATE] Stored recon in global cache")
-                
-                # Also store individual components
-                if not isinstance(nmap_result, Exception):
-                    _set_in_global_cache('nmap_scan_results', _ensure_serializable(nmap_result))
-                if not isinstance(dns_result, Exception):
-                    _set_in_global_cache('dns_recon_results', _ensure_serializable(dns_result))
-                if not isinstance(web_result, Exception):
-                    _set_in_global_cache('web_search_results', _ensure_serializable(web_result))
-                    
-                print(f"[STATE] Stored individual components in global cache")
-            except Exception as e2:
-                print(f"[WARNING] Could not store in global cache: {e2}")
-                # Emergency file-based fallback
-                try:
-                    import pickle
-                    import os
-                    cache_file = 'recon_cache.pkl'
-                    with open(cache_file, 'wb') as f:
-                        pickle.dump(results, f)
-                    print(f"[INFO] Saved recon results to emergency cache file: {cache_file}")
-                except Exception as e3:
-                    print(f"[WARNING] Could not save to emergency cache file: {e3}")
     else:
         logger.warning("Could not access session state to store combined recon results.")
         print("[WARNING] Could not store reconnaissance results in session state")
-        
-        # Always store in global cache as the primary fallback
-        try:
-            serializable_results = _ensure_serializable(results)
-            _set_in_global_cache('recon', serializable_results)
-            print(f"[STATE] Stored recon in global cache")
-            
-            # Also store individual components
-            if not isinstance(nmap_result, Exception):
-                _set_in_global_cache('nmap_scan_results', _ensure_serializable(nmap_result))
-            if not isinstance(dns_result, Exception):
-                _set_in_global_cache('dns_recon_results', _ensure_serializable(dns_result))
-            if not isinstance(web_result, Exception):
-                _set_in_global_cache('web_search_results', _ensure_serializable(web_result))
-                
-            print(f"[STATE] Stored individual components in global cache")
-        except Exception as e:
-            print(f"[WARNING] Could not store in global cache: {e}")
-            # Emergency file-based fallback as last resort
-            try:
-                import pickle
-                import os
-                cache_file = 'recon_cache.pkl'
-                with open(cache_file, 'wb') as f:
-                    pickle.dump(results, f)
-                print(f"[INFO] Saved recon results to emergency cache file: {cache_file}")
-            except Exception as e2:
-                print(f"[WARNING] Could not save to emergency cache file: {e2}")
     
     return results
