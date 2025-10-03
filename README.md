@@ -4,17 +4,45 @@
 
 **PhantomRecon** is a CLI-based, modular, agent-driven red team automation tool designed to demonstrate autonomous offensive security workflows powered by AI (Google's Gemini via Agent Development Kit - ADK).
 
+## Quick Start (CLI)
+
+- Run interactive console (metasploit-style):
+  ```bash
+  python -m phantomrecon
+  ```
+- One-shot non-interactive run:
+  ```bash
+  python -m phantomrecon --target example.com --auto \
+    --nmap-timeout 30 --nmap-top-ports 100 --nmap-args "-sV -Pn"
+  ```
+
+### CLI options
+- `--target <domain|ip>`: Target to assess
+- `--auto`: Run recon → plan → route → report
+- `--nmap-timeout <seconds>`: Overrides `NMAP_TIMEOUT`
+- `--nmap-top-ports <N>`: Overrides `NMAP_TOP_PORTS`
+- `--nmap-args "..."`: Appends to Nmap args (`NMAP_ARGS`)
+- `--nmap-disable`: Disable Nmap (sets `NMAP_DISABLE=1`)
+
+Environment variables are also supported directly: `NMAP_TIMEOUT`, `NMAP_TOP_PORTS`, `NMAP_ARGS`, `NMAP_DISABLE`.
+
+## Operational hygiene
+- Reports are not versioned. `.gitignore` excludes `reports/*` except `reports/sample_report.md`.
+- Generated HTML/MD reports live under `reports/` locally only.
+- Remove or rotate reports as needed; they are never uploaded in commits.
+
 Built as a proof-of-concept, it simulates identifying a target, performing broad reconnaissance (Nmap, DNS, Web Search), planning an attack strategy using an LLM, executing simulated exploits conditionally, and generating a report.
 
 ## Project Structure
 
 ```
 phantomrecon/
-├── phantomrecon/             # Main ADK agent module
+├── phantomrecon/             # Main package (exported orchestrator agent)
 │   ├── __init__.py
-│   └── agent.py              # Defines the root Sequential agent, sub-agents (Parallel Recon, LLM Planner, Router), and tools.
+│   ├── __main__.py           # CLI entrypoint (interactive and non-interactive)
+│   └── agent/                # Agent graph and tools
 ├── agents/                   # Python modules containing agent/tool logic
-│   ├── recon_logic.py        # Functions for Nmap, DNS (dig, whois), Web Search (simulated)
+│   ├── recon_logic.py        # Nmap, DNS (dig), seeded web analysis; ADK search enabled
 │   ├── routing_logic.py      # Logic for the Exploit Router agent
 │   ├── exploit_web_logic.py  # Functions for web exploits (currently simulated)
 │   ├── exploit_sql_logic.py  # Functions for SQL exploits (currently simulated)
@@ -68,18 +96,18 @@ phantomrecon/
     ```bash
     pip install -r requirements.txt
     ```
-5.  Configure API Keys:
+5.  Configure API Keys (env):
     *   Copy `.env.example` to `.env` (if example exists) or edit `.env`.
     *   Add your Google API Key (from AI Studio or Vertex AI setup) for the `GOOGLE_API_KEY` variable.
     *   Set `GOOGLE_GENAI_USE_VERTEXAI` to `True` or `False` and configure related variables (`GOOGLE_CLOUD_PROJECT`, `GOOGLE_CLOUD_LOCATION`) if using Vertex AI.
-6.  Run the agent using the ADK CLI:
-    *   For a specific target: `adk run phantomrecon -- --target <your_target_domain_or_ip>`
-    *   Using dummy data (if no target in `.env`): `adk run phantomrecon`
-    *   Using the web UI: `adk web` (then select `phantomrecon` agent)
+6.  Run the tool:
+    *   CLI interactive: `python -m phantomrecon`
+    *   CLI one-shot: `python -m phantomrecon --target <target> --auto`
+    *   ADK runner (optional): `adk run phantomrecon`
 
 ## Security Notice
 
-This tool is for authorized security testing and educational purposes **only**. Do not use against systems without explicit permission. The exploit modules are currently simulations but are intended to be replaced with real checks.
+This tool is for authorized security testing and educational purposes **only**. Do not use against systems without explicit permission.
 
 ## License
 
