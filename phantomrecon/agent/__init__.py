@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 # Direct import of ADK components
-from google.adk.agents import Agent, LlmAgent, SequentialAgent
+from google.adk.agents import Agent, LlmAgent, SequentialAgent, ParallelAgent, LoopAgent
 from google.adk.planners import BuiltInPlanner
 from google.genai import types as genai_types
 from google.adk.tools import FunctionTool
 from google.adk.tools.google_search_tool import GoogleSearchTool
+from google.adk.tools.exit_loop_tool import exit_loop
 import logging
 import json
 import os
@@ -29,6 +30,20 @@ from phantomrecon.agents.exploit_sql_logic import simple_run_sql_exploits
 from phantomrecon.agents.exploit_ssh_logic import simple_run_ssh_exploits
 # Import reporting functions
 from phantomrecon.agents.report_logic import simple_generate_final_report
+# Import specialist agents
+from phantomrecon.agents.specialist_agents import (
+    web_security_agent,
+    sql_injection_agent,
+    ssh_network_agent,
+    authentication_agent,
+    api_security_agent,
+    cloud_security_agent,
+    cryptography_agent,
+    cms_security_agent,
+    container_security_agent,
+    mobile_security_agent,
+)
+from phantomrecon.agents.audit_control_tools import aggregate_findings, should_continue_audit
 
 # Load environment variables relative to project root
 project_root_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
@@ -197,25 +212,122 @@ The report should be suitable for both technical and non-technical stakeholders.
 # Use ADK's BuiltInPlanner to dynamically select specialized sub-agents instead of fixed sequence
 orchestrator_agent = LlmAgent(
     name="PhantomReconOrchestrator",
-    model="gemini-1.5-flash-latest",
-    instruction=(
-        "You are the orchestrator for a multi-stage security assessment. "
-        "Select and invoke specialized sub-agents based on session state and user goals. "
-        "Ensure the target is validated, then perform reconnaissance, plan attacks, execute exploits as needed, and generate a report."
-    ),
-    global_instruction=(
-        "Always maintain a professional, concise tone. "
-        "Favor calling tools/agents over free-form text when actions are required."
-    ),
+    model="gemini-1.5-pro-latest",  # Using Pro for better reasoning
+    instruction="""You are a Senior Security Consultant and Red Team Lead conducting comprehensive security audits.
+
+YOUR ROLE:
+You are an autonomous penetration testing system. Given a target, you must conduct a FULL security audit 
+by strategically coordinating specialized security agents.
+
+AUTONOMOUS WORKFLOW:
+
+1. INITIAL RECONNAISSANCE
+   - First, ensure you have a valid target (invoke ValidationAgent if needed)
+   - Invoke the ReconAgent to gather comprehensive intelligence
+   - Analyze the attack surface: open ports, services, web technologies, etc.
+   
+2. STRATEGIC ANALYSIS
+   - Based on recon findings, identify ALL potential vulnerability areas
+   - Decide which specialist agents to invoke (you can invoke multiple in parallel)
+   - Prioritize based on what's most likely to yield results
+   
+3. VULNERABILITY ASSESSMENT & EXPLOITATION
+    - Invoke relevant specialist agents based on what was discovered:
+     * Web application/HTTP services? → Invoke WebSecuritySpecialist
+     * REST API or GraphQL detected? → Invoke APISecuritySpecialist
+     * Database indicators detected? → Invoke SQLInjectionSpecialist  
+     * SSH service open? → Invoke SSHNetworkSpecialist
+     * Authentication mechanisms found? → Invoke AuthenticationSpecialist
+     * Cloud-hosted (AWS/Azure/GCP)? → Invoke CloudSecuritySpecialist
+     * HTTPS detected? → Invoke CryptographySpecialist
+     * WordPress/Joomla/Drupal detected? → Invoke CMSSecuritySpecialist
+     * Docker/Kubernetes detected? → Invoke ContainerSecuritySpecialist
+     * Mobile app endpoints provided? → Invoke MobileSecuritySpecialist
+   - You can invoke multiple specialists in parallel when appropriate
+   - Analyze results from each agent
+   - If vulnerabilities are found, document them and continue testing
+   
+4. ITERATION & DEEP DIVE
+   - If you discover new attack vectors or entry points, DO NOT STOP
+   - Gather additional intelligence if needed (invoke ReconAgent again)
+   - Try alternative approaches if initial tests fail
+   - Continue until you've thoroughly tested all discovered attack surfaces
+   
+5. COMPREHENSIVE REPORTING
+   - Once audit is complete, invoke ReportAgent to generate findings
+   - Ensure ALL vulnerabilities and attempts are documented
+
+DECISION-MAKING PRINCIPLES:
+- Think strategically like a real penetration tester
+- Don't follow a rigid sequence - adapt based on what you find
+- Invoke agents in parallel when possible for efficiency
+- Be thorough: test every discovered service and endpoint
+- Iterate: if new information is discovered, adjust your approach
+- Document everything: successes and failures
+
+IMPORTANT:
+- You have FULL AUTONOMY to decide which agents to invoke and when
+- There is NO fixed sequence - you decide the strategy
+- You can invoke the same agent multiple times if needed
+- Parallel invocation is encouraged when appropriate
+- Stop only when you've completed a thorough security assessment""",
+    global_instruction="""Maintain a professional, methodical approach.
+- Always explain your strategic thinking before invoking agents
+- Provide brief summaries after each agent completes
+- Use clear, concise language
+- Act decisively - don't ask for permission, take action""",
     sub_agents=[
         validation_agent,
-        recon_agent,
-        planner_agent,
-        exploit_agent,
+        LoopAgent(
+            name="AuditLoop",
+            max_iterations=5,
+            sub_agents=[
+                recon_agent,
+                ParallelAgent(
+                    name="AssessmentParallel",
+                    sub_agents=[
+                        web_security_agent,
+                        api_security_agent,
+                        sql_injection_agent,
+                        ssh_network_agent,
+                        authentication_agent,
+                        cloud_security_agent,
+                        cryptography_agent,
+                        cms_security_agent,
+                        container_security_agent,
+                        mobile_security_agent,
+                    ],
+                    description="Run specialist assessments in parallel"
+                ),
+                LlmAgent(
+                    name="AggregateFindingsAgent",
+                    model="gemini-1.5-flash-latest",
+                    instruction="Use aggregate_findings to normalize and summarize results across specialists.",
+                    tools=[FunctionTool(func=aggregate_findings)],
+                    output_key="audit_aggregate"
+                ),
+                LlmAgent(
+                    name="ContinueDecisionAgent",
+                    model="gemini-1.5-flash-latest",
+                    instruction=(
+                        "First call should_continue_audit to decide if another iteration is needed. "
+                        "If the tool returns continue=false, immediately call exit_loop() to stop this loop."
+                    ),
+                    tools=[FunctionTool(func=should_continue_audit), FunctionTool(func=exit_loop)],
+                    output_key="audit_continue_decision"
+                ),
+            ],
+            description="Iterate recon + parallel assessment until stop criteria"
+        ),
         report_agent,
     ],
-    planner=BuiltInPlanner(thinking_config=genai_types.ThinkingConfig(include_thoughts=True, thinking_budget=-1)),
-    description="Agentic orchestrator that routes between Validation, Recon, Planning, Exploitation, and Reporting."
+    planner=BuiltInPlanner(
+        thinking_config=genai_types.ThinkingConfig(
+            include_thoughts=True, 
+            thinking_budget=-1  # Unlimited thinking for complex strategic decisions
+        )
+    ),
+    description="Autonomous Senior Security Consultant that conducts comprehensive penetration tests"
 )
 
 # Export orchestrator as the primary ADK entrypoint

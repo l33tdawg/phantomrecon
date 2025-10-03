@@ -29,10 +29,109 @@ import aiohttp
 import asyncio
 # ADK now provides GoogleSearchTool internally to Gemini; no direct import/usage here
 # Remove custom global cache fallbacks; rely on context.session.state throughout
+# Import rich for better parallel execution visualization
+from rich.live import Live
+from rich.table import Table
+from rich.console import Console
+from rich.spinner import Spinner
+from rich.text import Text
+from rich import box
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
+console = Console()
+
+class ParallelTaskTracker:
+    """Tracks and visualizes parallel task execution in real-time."""
+    
+    def __init__(self, target: str):
+        self.target = target
+        self.tasks = {
+            'nmap': {'status': 'pending', 'start_time': None, 'end_time': None, 'result': None},
+            'dns': {'status': 'pending', 'start_time': None, 'end_time': None, 'result': None},
+        }
+        
+    def start_task(self, task_name: str):
+        """Mark a task as started."""
+        if task_name in self.tasks:
+            self.tasks[task_name]['status'] = 'running'
+            self.tasks[task_name]['start_time'] = time.time()
+    
+    def complete_task(self, task_name: str, success: bool = True, result: Any = None):
+        """Mark a task as completed."""
+        if task_name in self.tasks:
+            self.tasks[task_name]['status'] = 'complete' if success else 'failed'
+            self.tasks[task_name]['end_time'] = time.time()
+            self.tasks[task_name]['result'] = result
+    
+    def get_elapsed(self, task_name: str) -> str:
+        """Get elapsed time for a task."""
+        task = self.tasks.get(task_name)
+        if not task or not task['start_time']:
+            return "0.0s"
+        
+        end = task['end_time'] if task['end_time'] else time.time()
+        elapsed = end - task['start_time']
+        return f"{elapsed:.1f}s"
+    
+    def generate_table(self) -> Table:
+        """Generate a rich Table showing current task status."""
+        table = Table(title=f"[bold cyan]Parallel Reconnaissance: {self.target}[/bold cyan]", 
+                     box=box.ROUNDED, 
+                     show_header=True,
+                     header_style="bold magenta")
+        
+        table.add_column("Agent", style="cyan", width=15)
+        table.add_column("Status", width=15)
+        table.add_column("Elapsed", justify="right", width=10)
+        table.add_column("Details", width=40)
+        
+        for task_name, task_info in self.tasks.items():
+            # Status with color and icon
+            status = task_info['status']
+            if status == 'pending':
+                status_text = Text("⏳ Pending", style="dim")
+            elif status == 'running':
+                status_text = Text("⚡ Running", style="bold yellow")
+            elif status == 'complete':
+                status_text = Text("✓ Complete", style="bold green")
+            else:  # failed
+                status_text = Text("✗ Failed", style="bold red")
+            
+            # Get details based on result
+            details = ""
+            if task_info['result'] and isinstance(task_info['result'], dict):
+                if task_name == 'nmap':
+                    scan_data = task_info['result'].get('scan', {})
+                    host_count = len(scan_data)
+                    if host_count > 0:
+                        details = f"{host_count} host(s) scanned"
+                elif task_name == 'dns':
+                    dns_records = task_info['result'].get('dns_records', {})
+                    subdomain_count = len(task_info['result'].get('subdomains', []))
+                    record_types = len(dns_records)
+                    details = f"{record_types} record types, {subdomain_count} subdomain(s)"
+            
+            if task_info['status'] == 'failed':
+                error = task_info['result'].get('error', 'Unknown error') if isinstance(task_info['result'], dict) else 'Task failed'
+                details = f"Error: {error[:35]}..."
+            
+            # Display task name
+            display_name = {
+                'nmap': 'NMAP Scan',
+                'dns': 'DNS Recon',
+            }.get(task_name, task_name.upper())
+            
+            table.add_row(
+                display_name,
+                status_text,
+                self.get_elapsed(task_name),
+                details
+            )
+        
+        return table
 
 def _load_dummy_data() -> Dict:
     """Load dummy scan data for testing or when no target is specified."""
@@ -63,17 +162,10 @@ async def perform_nmap_scan(**kwargs) -> Dict[str, Any]:
     """
     # Extract context from kwargs
     context = kwargs.get('context')
-    
-    # Debug state
-    if context and hasattr(context, 'session') and hasattr(context.session, 'state'):
-        print(f"[DEBUG-NMAP] State Keys: {list(context.session.state.keys())}")
-        print(f"[DEBUG-NMAP] initial_target: {context.session.state.get('initial_target')}")
-        print(f"[DEBUG-NMAP] State Type: {type(context.session.state)}")
         
     # Check for direct target override from parallel function
     direct_target = kwargs.get('direct_target_override')
     if direct_target:
-        print(f"[NMAP] Using direct target override: {direct_target}")
         target = direct_target
     else:
         # Extract target from context
@@ -92,7 +184,6 @@ async def perform_nmap_scan(**kwargs) -> Dict[str, Any]:
         return results
     
     logger.info(f"Starting Nmap scan for target: {target}")
-    print(f"[NMAP] Starting scan on {target}...")
     
     # Try to detect if target is an IP or domain name
     is_ip = False
@@ -125,13 +216,11 @@ async def perform_nmap_scan(**kwargs) -> Dict[str, Any]:
     
     command = ['nmap'] + scan_args + [target]
     command_str = ' '.join(command)
-    print(f"[NMAP] Running command: {command_str} (timeout={env_timeout}s)")
     
     stdout, stderr, returncode = await _run_command_async(command, timeout=env_timeout)
     
     if returncode != 0:
         logger.error(f"Nmap scan failed for {target}: {stderr}")
-        print(f"[NMAP] Scan failed with error: {stderr}")
         results = {
             "error": f"Nmap scan failed with return code {returncode}",
             "stderr": stderr,
@@ -139,7 +228,6 @@ async def perform_nmap_scan(**kwargs) -> Dict[str, Any]:
         }
     else:
         logger.info(f"Nmap scan completed for {target}")
-        print(f"[NMAP] Scan completed, processing results...")
         # Process the output into structured format
         scan_results = _parse_nmap_output(stdout)
         results = {
@@ -147,8 +235,6 @@ async def perform_nmap_scan(**kwargs) -> Dict[str, Any]:
             "command": command_str
         }
         
-    # Remove state-saving logic and just return results
-    print(f"[NMAP] Scan completed, returning results")
     return results
 
 # Note: analyze_vulnerabilities logic is removed from here.
@@ -166,16 +252,9 @@ async def perform_dns_recon(**kwargs) -> Dict[str, Any]:
     # Extract context from kwargs
     context = kwargs.get('context')
     
-    # Debug state
-    if context and hasattr(context, 'session') and hasattr(context.session, 'state'):
-        print(f"[DEBUG-DNS] State Keys: {list(context.session.state.keys())}")
-        print(f"[DEBUG-DNS] initial_target: {context.session.state.get('initial_target')}")
-        print(f"[DEBUG-DNS] State Type: {type(context.session.state)}")
-    
     # Check for direct target override from parallel function
     direct_target = kwargs.get('direct_target_override')
     if direct_target:
-        print(f"[DNS] Using direct target override: {direct_target}")
         target = direct_target
     else:
         # Extract target from context
@@ -196,17 +275,14 @@ async def perform_dns_recon(**kwargs) -> Dict[str, Any]:
         return results
     
     logger.info(f"Starting DNS recon for target: {target}")
-    print(f"[DNS] Starting reconnaissance on {target}...")
     
     # Check if target is likely an IP or domain
     is_ip = False
     try:
         ipaddress.ip_address(target)
         is_ip = True
-        print(f"[DNS] Target is an IP address")
     except ValueError:
         # Must be a domain name
-        print(f"[DNS] Target is a domain name")
         pass
     
     # Initialize results dictionary
@@ -223,7 +299,6 @@ async def perform_dns_recon(**kwargs) -> Dict[str, Any]:
     # If target is an IP, try a reverse lookup first
     if is_ip:
         logger.info(f"Target is an IP address ({target}). Attempting reverse lookup.")
-        print(f"[DNS] Attempting reverse lookup for IP {target}...")
         # Run reverse DNS lookup using dig
         command = ["dig", "-x", target, "+short"]
         stdout, stderr, returncode = await _run_command_async(command, timeout=10)
@@ -236,23 +311,19 @@ async def perform_dns_recon(**kwargs) -> Dict[str, Any]:
             # If we got a domain, we can continue to look up other records
             if reverse_domains:
                 logger.info(f"Found domains via reverse lookup: {reverse_domains}")
-                print(f"[DNS] Found domains via reverse lookup: {reverse_domains}")
                 # Use the first domain for additional lookups
                 target = reverse_domains[0]
                 is_ip = False
             else:
                 logger.info(f"No reverse DNS records found for IP {target}")
-                print(f"[DNS] No reverse DNS records found for IP {target}")
                 results["dns_records"] = {"error": "No reverse DNS records found"}
                 
         else:
             logger.warning(f"Reverse lookup failed for IP {target}: {stderr}")
-            print(f"[DNS] Reverse lookup failed: {stderr}")
             results["dns_records"] = {"error": f"Reverse lookup failed: {stderr}"}
     
     # Only proceed with DNS lookups if we have a domain
     if not is_ip:
-        print(f"[DNS] Looking up DNS records for {target}...")
         # Collect DNS records for each type
         for record_type in record_types:
             command = ["dig", target, record_type, "+short"]
@@ -264,23 +335,17 @@ async def perform_dns_recon(**kwargs) -> Dict[str, Any]:
                 
                 if records:
                     results["dns_records"][record_type] = records
-                    print(f"[DNS] Found {len(records)} {record_type} records")
                     
                     # Extract IP addresses from A/AAAA records
                     if record_type in ["A", "AAAA"]:
                         results["ip_addresses"].extend(records)
             else:
                 logger.warning(f"Failed to get {record_type} records for {target}: {stderr}")
-                print(f"[DNS] Failed to get {record_type} records: {stderr}")
     
     # Look for common subdomains if target is a domain
     if not is_ip:
-        print(f"[DNS] Searching for common subdomains...")
         await _find_subdomains(target, results)
-        print(f"[DNS] Found {len(results.get('subdomains', []))} subdomains")
     
-    # Remove state-saving logic and just return results
-    print(f"[DNS] Reconnaissance completed, returning results")
     return results
 
 async def _find_subdomains(target: str, results: Dict[str, Any], max_subdomains: int = 10) -> None:
@@ -873,61 +938,38 @@ async def perform_parallel_recon(**kwargs) -> Dict[str, Any]:
     # Extract context from kwargs first, regardless of whether we have a direct target
     context = kwargs.get('context')
     
-    # Enhanced state debugging - print all keys and their types
-    if context and hasattr(context, 'session') and hasattr(context.session, 'state'):
-        print(f"[DEBUG-PARALLEL] Full State Keys: {list(context.session.state.keys())}")
-        print(f"[DEBUG-PARALLEL] Context type: {type(context)}")
-        print(f"[DEBUG-PARALLEL] Session type: {type(context.session)}")
-        print(f"[DEBUG-PARALLEL] State type: {type(context.session.state)}")
-        
-        # Print details about the initial_target key specifically
-        if 'initial_target' in context.session.state:
-            target_value = context.session.state.get('initial_target')
-            print(f"[DEBUG-PARALLEL] initial_target exists with value: '{target_value}' (type: {type(target_value)})")
-        else:
-            print(f"[DEBUG-PARALLEL] initial_target key does not exist in state")
-    
     # Get state using our helper function, which handles cases where context is None
     state = get_global_state(context)
     
     # THEN check for direct target override
     direct_target = kwargs.get('direct_target_override')
     if direct_target:
-        print(f"[PARALLEL] Using direct target override: {direct_target}")
         target = direct_target
     else:
         # Extract target from state, prioritizing initial_target
         target = state.get('initial_target')
         if target:
             logger.info(f"Found target in state[initial_target]: {target}")
-            print(f"[STATE] Retrieved target from state: {target}")
         else:
             # Fall back to checking other potential state keys
             for potential_key in ['validation_result', 'user_input', 'target']:
                 potential_target = state.get(potential_key)
                 if potential_target and isinstance(potential_target, str):
                     target = potential_target
-                    print(f"[STATE] Found target in {potential_key}: {target}")
                     # Store it in initial_target for consistency
                     if context and hasattr(context, 'session') and hasattr(context.session, 'state'):
                         context.session.state['initial_target'] = target
                     # Also store in global cache
                     try:
                         _set_in_global_cache('initial_target', target)
-                        print(f"[STATE] Stored initial_target in global cache: {target}")
                     except Exception as e:
-                        print(f"[WARNING] Error storing in global cache: {e}")
+                        pass
                     break
-            
-            if not target:
-                logger.warning("Could not find target in any state key")
-                print("[STATE] Could not find target in any state key")
     
     # If no target is found, return an error
     if not target:
         error_msg = "No target specified. Please provide a target domain or IP address."
         logger.error(error_msg)
-        print(f"[ERROR] {error_msg}")
         
         # Return an error result instead of using a default target
         results = {
@@ -942,7 +984,6 @@ async def perform_parallel_recon(**kwargs) -> Dict[str, Any]:
                 # Apply serialization fix to error result
                 serializable_results = _ensure_serializable(results)
                 context.session.state['recon'] = serializable_results
-                print(f"[STATE] Stored error in recon state")
             except Exception as e:
                 logger.warning(f"Failed to store error in state: {e}")
         
@@ -950,29 +991,51 @@ async def perform_parallel_recon(**kwargs) -> Dict[str, Any]:
         try:
             serializable_results = _ensure_serializable(results)
             _set_in_global_cache('recon', serializable_results)
-            print(f"[STATE] Stored error in global cache")
         except Exception as e:
             logger.warning(f"Failed to store error in global cache: {e}")
         
         return results
     
-    # Ensure the target is passed to individual recon functions
-    print(f"\n[INFO] Starting parallel reconnaissance for {target}...")
-    
     # Create modified kwargs with explicit target
     modified_kwargs = kwargs.copy()
     modified_kwargs['direct_target_override'] = target
     
-    # Create tasks for all recon methods with the enriched kwargs
-    print("[INFO] Launching NMAP scan, DNS reconnaissance, and web search in parallel...")
+    # Initialize the task tracker
+    tracker = ParallelTaskTracker(target)
     
-    # Run NMAP and DNS tasks concurrently (web search is handled by LLM if needed)
-    tasks = [
-        asyncio.create_task(perform_nmap_scan(**modified_kwargs)),
-        asyncio.create_task(perform_dns_recon(**modified_kwargs)),
-    ]
-    print("[INFO] Waiting for NMAP and DNS reconnaissance tasks to complete...")
-    nmap_result, dns_result = await asyncio.gather(*tasks, return_exceptions=True)
+    # Create wrapper tasks that update the tracker
+    async def nmap_task():
+        tracker.start_task('nmap')
+        result = await perform_nmap_scan(**modified_kwargs)
+        success = not isinstance(result, Exception) and not result.get('error')
+        tracker.complete_task('nmap', success=success, result=result)
+        return result
+    
+    async def dns_task():
+        tracker.start_task('dns')
+        result = await perform_dns_recon(**modified_kwargs)
+        success = not isinstance(result, Exception) and not result.get('error')
+        tracker.complete_task('dns', success=success, result=result)
+        return result
+    
+    # Run tasks with live display
+    with Live(tracker.generate_table(), refresh_per_second=4, console=console) as live:
+        # Create tasks
+        tasks = [
+            asyncio.create_task(nmap_task()),
+            asyncio.create_task(dns_task()),
+        ]
+        
+        # Update display while tasks are running
+        while not all(task.done() for task in tasks):
+            live.update(tracker.generate_table())
+            await asyncio.sleep(0.25)
+        
+        # Wait for all tasks to complete
+        nmap_result, dns_result = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        # Final update to show completion
+        live.update(tracker.generate_table())
     
     # Set up the results structure
     results = {
@@ -984,33 +1047,24 @@ async def perform_parallel_recon(**kwargs) -> Dict[str, Any]:
     # Process nmap results
     if isinstance(nmap_result, Exception):
         logger.error(f"Nmap scan failed: {nmap_result}")
-        print(f"[ERROR] Nmap scan failed: {nmap_result}")
         results["nmap_scan"] = {"error": f"Scan failed: {str(nmap_result)}"}
     else:
-        print(f"[SUCCESS] Nmap scan completed successfully")
         results["nmap_scan"] = nmap_result
     
     # Process DNS results
     if isinstance(dns_result, Exception):
         logger.error(f"DNS recon failed: {dns_result}")
-        print(f"[ERROR] DNS reconnaissance failed: {dns_result}")
         results["dns_recon"] = {"error": f"DNS recon failed: {str(dns_result)}"}
     else:
-        print(f"[SUCCESS] DNS reconnaissance completed successfully")
         results["dns_recon"] = dns_result
-    
-    # No web_search in results; rely on analysis of known URLs if any are in state
     
     # Optionally run web content analysis if URLs are already present in state
     try:
-        print("[INFO] Starting web content analysis (if URLs present)...")
         web_analysis = await analyze_web_content(**modified_kwargs)
         if web_analysis and isinstance(web_analysis, dict) and web_analysis.get('status') != 'error':
-            print("[SUCCESS] Web content analysis completed successfully")
             results["web_analysis"] = web_analysis
     except Exception as e:
         logger.error(f"Web content analysis failed: {e}")
-        print(f"[ERROR] Web content analysis failed: {e}")
         results["web_analysis"] = {"error": f"Analysis failed: {str(e)}"}
     
     # Update overall status
@@ -1019,7 +1073,6 @@ async def perform_parallel_recon(**kwargs) -> Dict[str, Any]:
     
     if success_count == 2:
         results["status"] = "completed"
-        print(f"[INFO] All reconnaissance tasks completed successfully")
     elif success_count == 0:
         results["status"] = "failed"
         print(f"[WARNING] All reconnaissance tasks failed")

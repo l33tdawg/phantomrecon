@@ -147,14 +147,49 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
     *   **Reporting:** Generates a Markdown summary report.
 *   **State Management:** Uses ADK's `ToolContext` to pass data between agents/tools.
 
-## Architecture Notes (Current)
+## Architecture (Autonomous Multi-Agent System)
 
-- Orchestrator agent (ADK `BuiltInPlanner`) selects specialized sub-agents: Validation → Recon → Planning → Exploitation → Reporting.
-- State is read/written directly via `context.session.state` (no monkey patching or global cache wrappers).
-- Recon improvements:
-  - Env-configurable Nmap (`NMAP_TIMEOUT`, `NMAP_TOP_PORTS`, `NMAP_ARGS`, `NMAP_DISABLE`).
-  - URL seeding for analysis when no search results; ADK `GoogleSearchTool` enabled for LLM-side search.
-- Command execution uses `executor_fix.py` async helpers for robust timeouts and errors.
+PhantomRecon uses a fully autonomous multi-agent architecture powered by Google's Agent Development Kit (ADK).
+
+### Core Components
+
+**Senior Orchestrator Agent** (`gemini-1.5-pro-latest`)
+- Autonomous decision-making and strategic planning
+- Dynamically selects which specialist agents to invoke
+- Iterates based on findings (no fixed sequence)
+- Conducts comprehensive security audits with full autonomy
+
+**Specialized Security Agents**
+- **Reconnaissance Agent**: Port scanning, DNS enumeration, service detection
+- **Web Security Specialist**: XSS, CSRF, SSRF, Path Traversal, Open Redirect
+- **SQL Injection Specialist**: All SQL injection techniques across major databases
+- **SSH/Network Specialist**: SSH security auditing, network service testing
+- **Authentication Specialist**: Auth bypass, session security, privilege escalation
+- **Planning Agent**: Strategic attack planning based on findings
+- **Reporting Agent**: Comprehensive security report generation
+
+### Autonomous Operation
+
+The orchestrator operates like a senior penetration tester:
+1. Accepts a target domain/IP
+2. Plans reconnaissance strategy
+3. Analyzes findings and identifies attack surfaces
+4. Dynamically invokes specialist agents based on discoveries
+5. Iterates and adapts approach as new information emerges
+6. Generates comprehensive security audit report
+
+**Key Features**:
+- No fixed workflow - orchestrator decides strategy
+- Parallel agent execution for efficiency
+- Iterative deep-dive on discovered vulnerabilities
+- Adaptive approach based on target characteristics
+- Complete autonomy from target input to final report
+
+### Technical Details
+- State management via `context.session.state` (ADK sessions)
+- Parallel reconnaissance with real-time progress visualization (Rich library)
+- Async command execution with timeouts (`executor_fix.py`)
+- Configurable scanning parameters (env vars for Nmap, etc.)
 
 ## Usage
 
