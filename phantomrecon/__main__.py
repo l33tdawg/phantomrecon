@@ -67,40 +67,86 @@ async def run_auto(ctx: CliContext, target: str) -> Dict[str, Any]:
 
 
 def interactive_console():
-    print(f"PhantomRecon Console - Orchestrator: {orchestrator_agent.name}")
-    print("Type 'help' for commands. 'exit' to quit.")
+    # Simple ANSI colors (no external deps)
+    RESET = "\033[0m"; BOLD = "\033[1m"; CYAN = "\033[36m"; MAGENTA = "\033[35m"; GREEN = "\033[32m"; YELLOW = "\033[33m"; BLUE = "\033[34m"; RED = "\033[31m"
+
+    def banner():
+        art = f"""
+{MAGENTA}{BOLD}   ____  _                _                 ____                        
+  |  _ \| | __ _ _ __ | |_ ___  _ __    |  _ \ ___  ___ ___  _ __   
+  | |_) | |/ _` | '_ \| __/ _ \| '_ \   | |_) / _ \/ __/ _ \| '_ \  
+  |  __/| | (_| | | | | || (_) | | | |  |  _ <  __/ (_| (_) | | | | 
+  |_|   |_|\__,_|_| |_|\__\___/|_| |_|  |_| \_\___|\___\___/|_| |_| {RESET}
+{CYAN}          Agentic Recon Orchestrator • {orchestrator_agent.name}{RESET}
+        """
+        print(art)
+
+    def menu():
+        print(f"{BOLD}{CYAN}Commands{RESET}:")
+        print(f"  {YELLOW}set target <value>{RESET}     - Set target domain/IP")
+        print(f"  {YELLOW}show target{RESET}            - Show current target")
+        print(f"  {YELLOW}show state{RESET}             - Show session state keys")
+        print(f"  {YELLOW}recon{RESET}                  - Run parallel recon")
+        print(f"  {YELLOW}plan{RESET}                   - Generate attack plan")
+        print(f"  {YELLOW}route{RESET}                  - Decide next exploit")
+        print(f"  {YELLOW}report{RESET}                 - Generate final report")
+        print(f"  {YELLOW}auto{RESET}                   - Run recon->plan->route->report")
+        print(f"  {YELLOW}nmap timeout <s>{RESET}       - Set NMAP_TIMEOUT")
+        print(f"  {YELLOW}nmap top <N>{RESET}           - Set NMAP_TOP_PORTS")
+        print(f"  {YELLOW}nmap args <str>{RESET}        - Set NMAP_ARGS")
+        print(f"  {YELLOW}nmap disable{RESET}           - Toggle NMAP_DISABLE")
+        print(f"  {YELLOW}menu{RESET}                   - Show this menu")
+        print(f"  {YELLOW}help{RESET}                   - Show this menu")
+        print(f"  {YELLOW}exit{RESET}                   - Quit")
+
+    banner()
+    print(f"{GREEN}Type 'menu' for commands. 'exit' to quit.{RESET}")
     session = CliSession()
     ctx = CliContext(session)
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     target = None
+    def prompt() -> str:
+        t = session.state.get('initial_target')
+        suffix = f"[{t}]" if t else ""
+        return f"{BLUE}pr{suffix}>{RESET} "
     while True:
         try:
-            cmd = input('pr> ').strip()
+            cmd = input(prompt()).strip()
         except (EOFError, KeyboardInterrupt):
             print('\nExiting.')
             break
         if not cmd:
             continue
         if cmd in ('exit', 'quit'): break
-        if cmd == 'help':
-            print("""
-Commands:
-  set target <value>     - Set target domain/IP
-  show target            - Show current target
-  show state             - Show session state keys
-  recon                  - Run parallel recon
-  plan                   - Generate attack plan
-  route                  - Decide next exploit
-  report                 - Generate final report
-  auto                   - Run recon->plan->route->report
-  exit                   - Quit
-""")
+        if cmd in ('help','menu'):
+            menu()
             continue
         if cmd.startswith('set target '):
             target = cmd.split(' ', 2)[2].strip()
             session.state['initial_target'] = target
-            print(f"Target set: {target}")
+            print(f"{GREEN}Target set:{RESET} {target}")
+            continue
+        if cmd.startswith('nmap timeout '):
+            val = cmd.split(' ', 2)[2].strip()
+            os.environ['NMAP_TIMEOUT'] = val
+            print(f"NMAP_TIMEOUT={val}")
+            continue
+        if cmd.startswith('nmap top '):
+            val = cmd.split(' ', 2)[2].strip()
+            os.environ['NMAP_TOP_PORTS'] = val
+            print(f"NMAP_TOP_PORTS={val}")
+            continue
+        if cmd.startswith('nmap args '):
+            val = cmd.split(' ', 2)[2].strip()
+            os.environ['NMAP_ARGS'] = val
+            print(f"NMAP_ARGS=\"{val}\"")
+            continue
+        if cmd.strip() == 'nmap disable':
+            cur = os.environ.get('NMAP_DISABLE') in ('1','true','True')
+            new = '0' if cur else '1'
+            os.environ['NMAP_DISABLE'] = new
+            print(f"NMAP_DISABLE={new}")
             continue
         if cmd == 'show target':
             print(f"Target: {session.state.get('initial_target')}")
@@ -114,20 +160,20 @@ Commands:
                 continue
             res = loop.run_until_complete(run_recon(ctx))
             session.state['aggregated_recon_data'] = res
-            print(f"Recon status: {res.get('status')}")
+            print(f"{CYAN}Recon status:{RESET} {res.get('status')}")
             continue
         if cmd == 'plan':
             res = loop.run_until_complete(run_plan(ctx))
             session.state['attack_plan'] = res
-            print(f"Plan keys: {list(res.keys()) if isinstance(res, dict) else []}")
+            print(f"{CYAN}Plan keys:{RESET} {list(res.keys()) if isinstance(res, dict) else []}")
             continue
         if cmd == 'route':
             res = run_route(ctx)
-            print(f"Next: {res}")
+            print(f"{CYAN}Next:{RESET} {res}")
             continue
         if cmd == 'report':
             res = run_report(ctx)
-            print("Report generated.")
+            print(f"{GREEN}Report generated.{RESET}")
             continue
         if cmd == 'auto':
             if not session.state.get('initial_target'):
