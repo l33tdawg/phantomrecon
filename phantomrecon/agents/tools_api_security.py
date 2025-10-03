@@ -5,7 +5,12 @@ REST API, GraphQL, WebSocket, and API Authentication testing
 """
 import requests
 import json
-import jwt
+try:
+    import jwt  # PyJWT
+    JWT_AVAILABLE = True
+except Exception:
+    jwt = None
+    JWT_AVAILABLE = False
 from typing import Dict, List, Any, Optional
 from urllib.parse import urljoin, urlparse
 import logging
@@ -175,6 +180,9 @@ async def test_jwt_vulnerabilities(context=None, **kwargs) -> Dict[str, Any]:
         "vulnerabilities": [],
         "jwt_analysis": {}
     }
+    
+    if not JWT_AVAILABLE:
+        return {"error": "PyJWT not available. Install 'pyjwt' to run JWT tests."}
     
     if not jwt_token:
         return {"error": "No JWT token provided for testing"}

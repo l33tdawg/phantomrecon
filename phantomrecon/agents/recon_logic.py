@@ -285,12 +285,13 @@ async def perform_dns_recon(**kwargs) -> Dict[str, Any]:
         # Must be a domain name
         pass
     
-    # Initialize results dictionary
+    # Initialize results dictionary (flat keys) and also build a compatibility 'dns' view later
     results = {
         "target": target,
         "dns_records": {},
         "subdomains": [],
-        "ip_addresses": []
+        "ip_addresses": [],
+        "errors": []
     }
     
     # Use dig commands for more reliable DNS lookups
@@ -316,11 +317,10 @@ async def perform_dns_recon(**kwargs) -> Dict[str, Any]:
                 is_ip = False
             else:
                 logger.info(f"No reverse DNS records found for IP {target}")
-                results["dns_records"] = {"error": "No reverse DNS records found"}
-                
+                results["errors"].append("No reverse DNS records found")
         else:
             logger.warning(f"Reverse lookup failed for IP {target}: {stderr}")
-            results["dns_records"] = {"error": f"Reverse lookup failed: {stderr}"}
+            results["errors"].append(f"Reverse lookup failed: {stderr}")
     
     # Only proceed with DNS lookups if we have a domain
     if not is_ip:
@@ -341,11 +341,35 @@ async def perform_dns_recon(**kwargs) -> Dict[str, Any]:
                         results["ip_addresses"].extend(records)
             else:
                 logger.warning(f"Failed to get {record_type} records for {target}: {stderr}")
+                if stderr:
+                    results["errors"].append(f"dig {record_type} failed: {stderr.strip()}")
     
     # Look for common subdomains if target is a domain
     if not is_ip:
         await _find_subdomains(target, results)
     
+    # Attempt WHOIS lookup (best effort)
+    whois_output = None
+    try:
+        # Prefer 'whois' command if available
+        whois_cmd = ["whois", target]
+        stdout, stderr, returncode = await _run_command_async(whois_cmd, timeout=10)
+        if returncode == 0 and stdout:
+            # Don't store full text in results to avoid massive reports; keep as string for status
+            whois_output = stdout.strip()
+        elif returncode != 0 and stderr:
+            whois_output = f"Failed whois: {stderr.strip()}"
+    except Exception as e:
+        whois_output = f"Failed whois: {str(e)}"
+
+    if whois_output:
+        results["whois"] = whois_output
+
+    # Build compatibility view under 'dns.dig' expected by report builder
+    results["dns"] = {
+        "dig": results.get("dns_records", {}),
+    }
+
     return results
 
 async def _find_subdomains(target: str, results: Dict[str, Any], max_subdomains: int = 10) -> None:

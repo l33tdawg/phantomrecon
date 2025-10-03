@@ -12,6 +12,11 @@ from phantomrecon.agents.recon_logic import perform_parallel_recon
 from phantomrecon.agents.planner_logic import simple_create_attack_plan
 from phantomrecon.agents.routing_logic import simple_decide_next_exploit
 from phantomrecon.agents.report_logic import simple_generate_final_report
+from phantomrecon.agents.tools_web_security import (
+    headless_crawl_site,
+    detect_directory_listing,
+    test_security_headers,
+)
 
 
 class CliSession:
@@ -36,6 +41,82 @@ async def run_plan(ctx: CliContext, recon_data: Dict[str, Any] | None = None) ->
     return await simple_create_attack_plan(context=ctx, recon_data=recon_data)
 
 
+async def run_assessments(ctx: CliContext) -> list[Dict[str, Any]]:
+    """Run a minimal set of specialist assessments to populate exploit_results."""
+    results: list[Dict[str, Any]] = []
+    target = ctx.session.state.get('initial_target')
+    try:
+        crawl = await headless_crawl_site(context=ctx, target=target, max_pages=50)
+        if isinstance(crawl, dict):
+            pages = crawl.get('pages') or []
+            finding = {
+                "type": "crawl_summary",
+                "pages_crawled": crawl.get('pages_crawled', len(pages)),
+                "num_pages_with_forms": sum(1 for p in pages if isinstance(p, dict) and p.get('num_forms', 0) > 0),
+                "sample_pages": [p.get('url') for p in pages[:5] if isinstance(p, dict) and p.get('url')],
+            }
+            results.append({
+                "test": "headless_crawl_site",
+                "target": target,
+                "status": "completed",
+                "findings": [finding],
+            })
+    except Exception as e:
+        results.append({"test": "headless_crawl_site", "status": "error", "message": str(e)})
+    try:
+        listing = await detect_directory_listing(context=ctx, target=target)
+        if isinstance(listing, dict):
+            vulns = listing.get('vulnerabilities') or []
+            findings = []
+            for v in vulns:
+                if isinstance(v, dict):
+                    findings.append({
+                        "type": "misconfiguration",
+                        "subtype": "directory_listing",
+                        "severity": v.get('severity', 'MEDIUM'),
+                        "url": v.get('url'),
+                        "path": v.get('path'),
+                        "message": v.get('evidence') or v.get('message') or 'Directory listing enabled',
+                    })
+            results.append({
+                "test": "detect_directory_listing",
+                "target": target,
+                "status": "completed",
+                "findings": findings,
+            })
+    except Exception as e:
+        results.append({"test": "detect_directory_listing", "status": "error", "message": str(e)})
+    try:
+        headers = await test_security_headers(context=ctx, target=target)
+        if isinstance(headers, dict):
+            missing = headers.get('headers_missing') or []
+            header_findings = []
+            for h in missing:
+                if isinstance(h, dict):
+                    header_findings.append({
+                        "type": "missing_security_header",
+                        "header": h.get('header'),
+                        "recommended": h.get('recommended'),
+                        "severity": "MEDIUM" if h.get('header') not in ['X-XSS-Protection', 'Referrer-Policy'] else "LOW",
+                        "message": f"Missing header: {h.get('header')}",
+                    })
+            # Also include any vulnerability entries already computed by the tool
+            for v in headers.get('vulnerabilities') or []:
+                if isinstance(v, dict):
+                    header_findings.append(v)
+            results.append({
+                "test": "security_headers",
+                "target": target,
+                "status": "completed",
+                "findings": header_findings,
+            })
+    except Exception as e:
+        results.append({"test": "security_headers", "status": "error", "message": str(e)})
+
+    ctx.session.state['exploit_results'] = results
+    return results
+
+
 def run_route(ctx: CliContext) -> str | None:
     return simple_decide_next_exploit(context=ctx)
 
@@ -57,9 +138,12 @@ async def run_auto(ctx: CliContext, target: str) -> Dict[str, Any]:
     plan = await run_plan(ctx, recon)
     ctx.session.state['attack_plan'] = plan
     results['plan_keys'] = list(plan.keys()) if isinstance(plan, dict) else []
-    # Route
+    # Route (advisory)
     next_step = run_route(ctx)
     results['router_next'] = next_step
+    # Run a minimal assessment to generate findings
+    assessments = await run_assessments(ctx)
+    results['assessments_run'] = [r.get('test') for r in assessments]
     # Report
     report = run_report(ctx)
     results['report_ok'] = isinstance(report, (dict, str))

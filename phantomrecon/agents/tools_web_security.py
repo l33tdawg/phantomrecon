@@ -521,7 +521,7 @@ logger.info("Web security tools module loaded")
 # HEADLESS BROWSER CRAWLING AND DIRECTORY LISTING DETECTION
 # ==============================================================================
 
-def _init_headless_chrome() -> Optional[webdriver.Chrome]:
+def _init_headless_chrome() -> Optional[Any]:
     if not SELENIUM_AVAILABLE:
         return None
     options = ChromeOptions()
