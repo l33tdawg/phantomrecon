@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 # Direct import of ADK components
 from google.adk.agents import Agent, LlmAgent, SequentialAgent
+from google.adk.planners import BuiltInPlanner
+from google.genai import types as genai_types
 from google.adk.tools import FunctionTool
 import logging
 import json
@@ -14,7 +16,6 @@ from phantomrecon.agents.validation_logic import validate_attack_plan # Keep if 
 from phantomrecon.agents.recon_logic import (
     perform_nmap_scan, 
     perform_dns_recon, 
-    perform_web_search, 
     perform_parallel_recon
 )
 # Import planning logic
@@ -49,7 +50,6 @@ def load_prompt(filename: str) -> str:
 # Individual tool definitions
 perform_nmap_scan_tool = FunctionTool(func=perform_nmap_scan)
 perform_dns_recon_tool = FunctionTool(func=perform_dns_recon)
-perform_web_search_tool = FunctionTool(func=perform_web_search)
 # New parallel recon tool that runs all recon methods at once
 perform_parallel_recon_tool = FunctionTool(func=perform_parallel_recon)
 
@@ -110,7 +110,6 @@ recon_agent = LlmAgent(
         # Keep individual tools as fallbacks
         perform_nmap_scan_tool,
         perform_dns_recon_tool,
-        perform_web_search_tool,
     ],
     output_key="recon_results", # Store the final summary/status
     description="Performs parallel reconnaissance on the target from state['initial_target']."
@@ -191,19 +190,32 @@ The report should be suitable for both technical and non-technical stakeholders.
     description="Generates a comprehensive security report based on all findings"
 )
 
-# --- Assign to 'agent' variable for adk run ---
-sequential_pipeline = SequentialAgent(
-    name="PhantomReconPipeline",
+# --- Orchestrator (Agentic) setup ---
+# Use ADK's BuiltInPlanner to dynamically select specialized sub-agents instead of fixed sequence
+orchestrator_agent = LlmAgent(
+    name="PhantomReconOrchestrator",
+    model="gemini-1.5-flash-latest",
+    instruction=(
+        "You are the orchestrator for a multi-stage security assessment. "
+        "Select and invoke specialized sub-agents based on session state and user goals. "
+        "Ensure the target is validated, then perform reconnaissance, plan attacks, execute exploits as needed, and generate a report."
+    ),
+    global_instruction=(
+        "Always maintain a professional, concise tone. "
+        "Favor calling tools/agents over free-form text when actions are required."
+    ),
     sub_agents=[
-        validation_agent,  # LlmAgent for validation
-        recon_agent,       # Reconnaissance agent
-        planner_agent,     # Planning agent
-        exploit_agent,     # Exploitation agent
-        report_agent       # Reporting agent
+        validation_agent,
+        recon_agent,
+        planner_agent,
+        exploit_agent,
+        report_agent,
     ],
-    description="Orchestrates the complete PhantomRecon workflow: Validate -> Recon -> Plan -> Exploit -> Report"
+    planner=BuiltInPlanner(thinking_config=genai_types.ThinkingConfig(include_thoughts=True, thinking_budget=-1)),
+    description="Agentic orchestrator that routes between Validation, Recon, Planning, Exploitation, and Reporting."
 )
 
-agent = sequential_pipeline
+# Export orchestrator as the primary ADK entrypoint
+agent = orchestrator_agent
 
-logger.info("PhantomRecon Sequential Agent Pipeline initialized in __init__.py.")
+logger.info("PhantomRecon Orchestrator initialized with BuiltInPlanner.")

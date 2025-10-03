@@ -874,8 +874,8 @@ def generate_final_report(context: ToolContext) -> Dict[str, Any]:
     # Get state using our helper function
     state = get_global_state(context)
     
-    # Extract data from state - use the correct key name 'aggregated_recon_data' instead of 'nmap_results'
-    recon_data = state.get('aggregated_recon_data', {})
+    # Extract data from state: prefer 'aggregated_recon_data', fallback to 'recon'
+    recon_data = state.get('aggregated_recon_data') or state.get('recon', {})
     attack_plan = state.get('attack_plan', {})
     
     # Handle the case where attack_plan is a string (JSON serialized)
