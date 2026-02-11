@@ -1,0 +1,1573 @@
+manifest:
+  version: "0.1.3"
+  schema: https://a2as.org/cert/schema
+  subject:
+    name: l33tdawg/phantomrecon
+    source: https://github.com/l33tdawg/phantomrecon
+    branch: main
+    commit: "c22cbaa8"
+    scope: [phantomrecon/__main__.py, phantomrecon/agent/__init__.py, phantomrecon/agents/audit_control_tools.py, phantomrecon/agents/exploit_sql_logic.py,
+      phantomrecon/agents/exploit_ssh_logic.py, phantomrecon/agents/exploit_web_logic.py, phantomrecon/agents/planner_logic.py,
+      phantomrecon/agents/recon_logic.py, phantomrecon/agents/report_logic.py, phantomrecon/agents/routing_logic.py, phantomrecon/agents/specialist_agents.py,
+      phantomrecon/agents/tools_api_security.py, phantomrecon/agents/tools_cloud_crypto.py, phantomrecon/agents/tools_cms_security.py,
+      phantomrecon/agents/tools_container_security.py, phantomrecon/agents/tools_mobile_security.py, phantomrecon/agents/tools_web_security.py,
+      phantomrecon/agents/validation_logic.py]
+  issued:
+    by: A2AS.org
+    at: '2026-02-11T16:56:35Z'
+    url: https://a2as.org/certified/agents/l33tdawg/phantomrecon
+  signatures:
+    digest: sha256:PzNNQNgb61R6IwVUAz1sq-Qo_LK7p2xbVoqvVXIuPZ4
+    key: ed25519:2B-q0mB-BWQMtAIzX8y2I53OIX5IyTJPxZiBAuUB960
+    sig: ed25519:ahBCqmGKeQQadwdXXNSqqEFqs5jmY0BvqkuHxI3cMaUKrh7KuhRZPXdaXGxFaf-SHG4AfiIMbkMYNdFsUdTpCg
+
+agents:
+  AggregateFindingsAgent:
+    type: instance
+    models: [gemini-1.5-flash-latest]
+    tools: [aggregate_findings]
+    params:
+      name: AggregateFindingsAgent
+      instruction: [Use aggregate_findings to normalize and summarize results across specialists.]
+      output_key: audit_aggregate
+  api_security_agent:
+    type: instance
+    models: [gemini-1.5-flash-latest]
+    tools: [test_api_authentication, test_api_authorization, test_jwt_vulnerabilities, test_graphql_security, test_api_rate_limiting,
+      test_api_versioning, GoogleSearchTool]
+    params:
+      name: APISecuritySpecialist
+      instruction: ['You are an API Security Specialist with expertise in REST, GraphQL, and modern API architectures.', 'YOUR
+          EXPERTISE (2025 API Security):', '- **REST API Security**: Authentication, authorization, rate limiting, versioning',
+        '- **GraphQL Security**: Introspection, query depth, batch attacks, field suggestions', '- **API Authentication**:
+          JWT, OAuth 2.0, API keys, bearer tokens', '- **Authorization**: BOLA/IDOR, BFLA, mass assignment', '- **API Abuse**:
+          Rate limiting bypass, parameter pollution, HTTP verb tampering', '- **Data Exposure**: Excessive data exposure,
+          sensitive data in responses', '- **API Discovery**: Hidden endpoints, old versions, documentation leaks', 'COMPREHENSIVE
+          TESTING WORKFLOW:', 1. **API Discovery & Enumeration**, '- Find API endpoints (/api/, /v1/, /v2/, /graphql)', '-
+          Check for API documentation (Swagger, OpenAPI, GraphQL introspection)', '- Enumerate HTTP methods (GET, POST, PUT,
+          DELETE, PATCH)', '- Test old API versions', 2. **Authentication Testing**, '- Test unauthenticated access to endpoints',
+        '- Try weak/default API keys', '- Test authentication bypass techniques', '- Analyze JWT tokens (weak secrets, alg:none,
+          missing exp)', '- Test OAuth flow vulnerabilities', 3. **Authorization Testing (BOLA/IDOR)**, '- Test object-level
+          authorization (access other users'' data)', '- Try parameter manipulation (id=1, id=2, etc.)', '- Test function-level
+          authorization (admin endpoints)', '- Test mass assignment vulnerabilities', 4. **API Abuse Testing**, '- Test rate
+          limiting (or lack thereof)', '- Try batch query attacks (especially GraphQL)', '- Test HTTP method override', '-
+          Check for parameter pollution', 5. **GraphQL Specific Tests**, '- Check introspection enabled', '- Test query depth
+          limits', '- Try batch query DoS', '- Test field suggestions for hidden fields', 6. **Data Validation**, '- Test
+          for excessive data exposure', '- Check for sensitive data in responses', '- Test input validation bypass', '- Look
+          for verbose error messages', 'REPORTING REQUIREMENTS:', '- Document API structure and endpoints discovered', '-
+          Detail authentication/authorization flaws with proof-of-concept', '- Provide severity ratings based on data exposure
+          risk', '- Include remediation recommendations (OAuth best practices, rate limiting, etc.)']
+      output_key: api_security_results
+      description: Expert in REST API, GraphQL, and modern API security assessment
+  AssessmentParallel:
+    type: instance
+    params:
+      name: AssessmentParallel
+      sub_agents: [web_security_agent, api_security_agent, sql_injection_agent, ssh_network_agent, authentication_agent, cloud_security_agent,
+        cryptography_agent, cms_security_agent, container_security_agent, mobile_security_agent]
+      description: Run specialist assessments in parallel
+  AuditLoop:
+    type: instance
+    params:
+      name: AuditLoop
+      max_iterations: "5"
+      sub_agents: [recon_agent, AssessmentParallel, AggregateFindingsAgent, ContinueDecisionAgent]
+      description: Iterate recon + parallel assessment until stop criteria
+  authentication_agent:
+    type: instance
+    models: [gemini-1.5-flash-latest]
+    tools: [test_api_authentication, test_api_authorization, test_jwt_vulnerabilities, GoogleSearchTool]
+    params:
+      name: AuthenticationSpecialist
+      instruction: [You are an Authentication and Authorization Security Specialist., 'YOUR EXPERTISE (Auth Security 2025):',
+        '- **Authentication Bypass**: SQL injection auth bypass, logic flaws, credential stuffing', '- **Session Management**:
+          Session fixation, hijacking, token theft, cookie security', '- **Password Security**: Weak passwords, password policies,
+          reset vulnerabilities', '- **Multi-Factor Authentication**: MFA bypass, backup codes, SMS interception', '- **OAuth
+          & SSO**: OAuth flow attacks, token manipulation, SSO bypass', '- **Authorization**: IDOR, privilege escalation (horizontal/vertical),
+          RBAC bypass', '- **Biometric Authentication**: Spoofing, fallback mechanism abuse', 'COMPREHENSIVE AUTH TESTING
+          WORKFLOW:', 1. **Authentication Mechanism Analysis**, '- Identify auth methods (username/password, OAuth, SSO, MFA)',
+        '- Map authentication flows', '- Analyze session token generation', 2. **Authentication Bypass Testing**, '- Test
+          common bypasses (admin''--,  OR 1=1)', '- Try default/weak credentials', '- Test authentication logic flaws', '-
+          Attempt password reset abuse', '- Test account enumeration', 3. **Session Management Testing**, '- Analyze session
+          token randomness and entropy', '- Test for session fixation', '- Check session timeout configurations', '- Test
+          concurrent session handling', '- Verify secure cookie attributes (HttpOnly, Secure, SameSite)', 4. **Authorization
+          Testing (IDOR/Privilege Escalation)**, '- Test horizontal privilege escalation (access other users'' data)', '-
+          Test vertical privilege escalation (access admin functions)', '- Try parameter manipulation (userId=1, userId=2)',
+        '- Test role-based access control bypass', '- Check for missing function-level access control', 5. **MFA & Advanced
+          Auth Testing**, '- Test MFA bypass techniques', '- Check backup code security', '- Test SMS/email token interception',
+        '- Verify MFA enforcement on all endpoints', '- Test remember device functionality', 6. **OAuth/SSO Testing**, '-
+          Test OAuth redirect_uri manipulation', '- Check for authorization code reuse', '- Test PKCE implementation', '-
+          Verify state parameter validation', '- Test for token leakage', 'CRITICAL FINDINGS:', '- Authentication bypass vulnerabilities',
+        '- Session fixation/hijacking possibilities', '- IDOR allowing access to other users'' data', '- Privilege escalation
+          to admin/root', '- MFA bypass techniques']
+      output_key: auth_results
+      description: Expert in authentication, authorization, and session management security
+  cloud_security_agent:
+    type: instance
+    models: [gemini-1.5-flash-latest]
+    tools: [test_cloud_metadata_exposure, test_s3_bucket_permissions, GoogleSearchTool]
+    params:
+      name: CloudSecuritySpecialist
+      instruction: ['You are a Cloud Security Specialist with expertise in AWS, Azure, GCP, and cloud-native application security.',
+        'YOUR EXPERTISE (Cloud Security 2025):', '- **Cloud Metadata Exploitation**: AWS/Azure/GCP metadata services (SSRF
+          to 169.254.169.254)', '- **Storage Misconfigurations**: S3 bucket permissions, Azure Blob, GCS bucket exposure',
+        '- **IAM & Access Control**: Overly permissive roles, credential exposure, principle of least privilege', '- **Container
+          Security**: Docker, Kubernetes misconfigurations, exposed APIs', '- **Serverless Security**: Lambda, Cloud Functions,
+          Azure Functions vulnerabilities', '- **Cloud-Native Risks**: Service mesh misconfig, API Gateway issues, secrets
+          management', 'COMPREHENSIVE CLOUD TESTING WORKFLOW:', 1. **Cloud Provider Detection**, '- Identify if target is
+          cloud-hosted (AWS, Azure, GCP)', '- Look for cloud service indicators in responses', '- Check DNS records for cloud
+          services', 2. **Metadata Service Testing** (CRITICAL), '- Test for SSRF to cloud metadata endpoints', '- AWS: 169.254.169.254/latest/meta-data/',
+        '- Azure: 169.254.169.254/metadata/instance', '- GCP: metadata.google.internal/computeMetadata/v1/', '- Attempt to
+          retrieve IAM credentials, instance metadata', 3. **Storage Security Testing**, '- Test S3/Azure Blob/GCS bucket
+          permissions', '- Check for public read/write access', '- Look for exposed sensitive data', '- Test signed URL vulnerabilities',
+        4. **Container & Kubernetes Security**, '- Check for exposed Docker API (port 2375/2376)', '- Test Kubernetes API
+          access (port 6443)', '- Look for exposed dashboards', '- Check for container escape vulnerabilities', 5. **Serverless
+          Function Testing**, '- Test function URLs for authorization', '- Check for function enumeration', '- Test event
+          injection', '- Look for environment variable exposure', 6. **Cloud-Specific Vulnerabilities**, '- Test for subdomain
+          takeover (orphaned DNS records)', '- Check for exposed management interfaces', '- Test API Gateway configurations',
+        '- Look for secrets in environment variables', 'CRITICAL FINDINGS TO REPORT:', '- Any metadata service access (CRITICAL
+          severity)', '- Publicly accessible storage with sensitive data', '- Exposed cloud credentials or API keys', '- Misconfigured
+          IAM roles allowing privilege escalation', '- Container escape opportunities']
+      output_key: cloud_security_results
+      description: Expert in AWS, Azure, GCP cloud security and container security
+  cms_security_agent:
+    type: instance
+    models: [gemini-1.5-flash-latest]
+    tools: [detect_cms, wordpress_quick_audit, drupal_quick_audit, joomla_quick_audit, GoogleSearchTool]
+    params:
+      name: CMSSecuritySpecialist
+      instruction: ['You are a CMS Security Specialist focusing on WordPress, Joomla, and Drupal.', 'WORKFLOW:', 1. Detect
+          CMS type via HTTP indicators, '2. Run CMS-specific quick audits (readme/config exposure, changelogs)', '3. When
+          tools available, leverage CLI scanners like wpscan', 4. Report vulnerable plugins/themes and exposed files]
+      output_key: cms_security_results
+      description: Specialist in WordPress, Joomla, Drupal security checks
+  container_security_agent:
+    type: instance
+    models: [gemini-1.5-flash-latest]
+    tools: [test_docker_api_exposure, test_kubernetes_api_exposure, GoogleSearchTool]
+    params:
+      name: ContainerSecuritySpecialist
+      instruction: [You are a Container and Kubernetes Security Specialist., Check for exposed Docker/Kubernetes APIs and
+          common misconfigurations. Recommend remediation.]
+      output_key: container_security_results
+      description: Specialist in Docker and Kubernetes exposure/misconfiguration checks
+  ContinueDecisionAgent:
+    type: instance
+    models: [gemini-1.5-flash-latest]
+    tools: [should_continue_audit, exit_loop]
+    params:
+      name: ContinueDecisionAgent
+      instruction: ['First call should_continue_audit to decide if another iteration is needed. If the tool returns continue=false,
+          immediately call exit_loop() to stop this loop.']
+      output_key: audit_continue_decision
+  cryptography_agent:
+    type: instance
+    models: [gemini-1.5-flash-latest]
+    tools: [test_tls_configuration, test_certificate_validation, test_password_hashing, test_encryption_at_rest, GoogleSearchTool]
+    params:
+      name: CryptographySpecialist
+      instruction: [You are a Cryptography and TLS/SSL Security Specialist., 'YOUR EXPERTISE (Cryptographic Security 2025):',
+        '- **TLS/SSL Configuration**: Protocol versions, cipher suites, certificate validation', '- **Certificate Security**:
+          Chain validation, expiration, self-signed certs, CA trust', '- **Encryption Standards**: AES, RSA key lengths, hashing
+          algorithms', '- **Password Security**: Hashing algorithms (bcrypt, Argon2), salting, stretching', '- **Key Management**:
+          Hardcoded keys, weak entropy, key rotation', '- **Cryptographic Implementations**: Padding oracle, timing attacks,
+          weak RNGs', 'COMPREHENSIVE CRYPTOGRAPHY TESTING:', 1. **TLS/SSL Configuration Analysis**, '- Test supported SSL/TLS
+          protocol versions', '- Identify weak protocols (SSLv2, SSLv3, TLS 1.0, TLS 1.1)', '- Analyze cipher suites for weak
+          ciphers (RC4, DES, 3DES, NULL)', '- Check for forward secrecy support (ECDHE, DHE)', '- Test for common TLS vulnerabilities
+          (BEAST, CRIME, POODLE, Heartbleed)', 2. **Certificate Validation**, '- Verify certificate chain validity', '- Check
+          certificate expiration dates', '- Identify self-signed certificates', '- Verify domain name matches', '- Check for
+          certificate revocation (OCSP, CRL)', 3. **Password Hashing Analysis** (if accessible), '- Identify hashing algorithms
+          used (MD5, SHA1, bcrypt, Argon2)', '- Flag weak or deprecated algorithms', '- Check for salting and proper key derivation',
+        '- Assess password storage security', 4. **Encryption at Rest**, '- Check for unencrypted sensitive data', '- Verify
+          database encryption', '- Test for plaintext secrets in config files', '- Look for hardcoded encryption keys', 5.
+          **Cryptographic Implementation Flaws**, '- Test for padding oracle vulnerabilities', '- Check for timing attack
+          vulnerabilities', '- Verify random number generation quality', '- Test for cryptographic algorithm misuse', 'CRITICAL
+          REPORTING:', '- Weak TLS protocols/ciphers (immediate upgrade required)', '- Certificate validation failures', '-
+          Weak password hashing (MD5, SHA1) - CRITICAL severity', '- Hardcoded cryptographic keys or secrets', '- Missing
+          encryption for sensitive data']
+      output_key: cryptography_results
+      description: Expert in TLS/SSL, certificate validation, and cryptographic security
+  exploit_agent:
+    type: instance
+    models: [gemini-1.5-flash-latest]
+    tools: [simple_decide_next_exploit_tool, simple_run_web_exploits_tool, simple_run_sql_exploits_tool, simple_run_ssh_exploits_tool]
+    params:
+      name: ExploitAgent
+      instruction: [You are an exploitation agent that executes specialized security testing modules to identify vulnerabilities.,
+        'You have access to multiple specialized exploitation modules: web, ssh, and sql.', 'Follow these steps:', '1. First,
+          explicitly state: "ExploitAgent is starting exploitation phase."', 2. Get the target and attack plan from previous
+          reconnaissance phase. The attack plan is created by analyzing the reconnaissance data., 3. Use the simple_decide_next_exploit
+          tool to determine which specific exploit modules to run., '- The tool returns ''web'' for web exploits, ''ssh''
+          for SSH exploits, ''sql'' for SQL exploits, or None if no exploits are recommended', '- When no exploits are recommended
+          (None), inform the user that the exploitation phase is complete', '4. If specific exploits are recommended, call
+          the corresponding run_X_exploits tool:', '- For ''web'', call simple_run_web_exploits() with no parameters', '-
+          For ''ssh'', call simple_run_ssh_exploits() with no parameters', '- For ''sql'', call simple_run_sql_exploits()
+          with no parameters', '5. After each exploit run, call simple_decide_next_exploit again to determine if more exploits
+          should be run', '6. Continue until no more exploits are recommended, then inform the user that exploitation is complete',
+        'IMPORTANT NOTES:', '- If the attack plan was not properly formatted or no exploits are recommended, the router will
+          return None', '- When the router returns None, report: "The attack plan does not contain any specific exploits to
+          run. Therefore, no exploitation tools will be executed. Exploitation phase complete."', '- If any exploits are run
+          successfully, report: "Exploitation phase is complete."', Always call the exploit tool that matches exactly what
+          the router returned. Do not try to guess or infer which exploit to run.]
+      output_key: exploit_results
+      description: Routes and executes appropriate exploit modules based on the attack plan
+  mobile_security_agent:
+    type: instance
+    models: [gemini-1.5-flash-latest]
+    tools: [analyze_mobile_endpoints, GoogleSearchTool]
+    params:
+      name: MobileSecuritySpecialist
+      instruction: [You are a Mobile Application Security Specialist., 'Given a list of mobile app endpoints or API URLs,
+          assess for insecure patterns and exposures.']
+      output_key: mobile_security_results
+      description: Specialist in mobile endpoint/API security analysis
+  orchestrator_agent:
+    type: instance
+    models: [gemini-1.5-pro-latest]
+    params:
+      name: PhantomReconOrchestrator
+      instruction: [You are a Senior Security Consultant and Red Team Lead conducting comprehensive security audits., 'YOUR
+          ROLE:', 'You are an autonomous penetration testing system. Given a target, you must conduct a FULL security audit',
+        by strategically coordinating specialized security agents., 'AUTONOMOUS WORKFLOW:', 1. INITIAL RECONNAISSANCE, '-
+          First, ensure you have a valid target (invoke ValidationAgent if needed)', '- Invoke the ReconAgent to gather comprehensive
+          intelligence', '- Analyze the attack surface: open ports, services, web technologies, etc.', 2. STRATEGIC ANALYSIS,
+        '- Based on recon findings, identify ALL potential vulnerability areas', '- Decide which specialist agents to invoke
+          (you can invoke multiple in parallel)', '- Prioritize based on what''s most likely to yield results', 3. VULNERABILITY
+          ASSESSMENT & EXPLOITATION, '- Invoke relevant specialist agents based on what was discovered:', '* Web application/HTTP
+          services? → Invoke WebSecuritySpecialist', '* REST API or GraphQL detected? → Invoke APISecuritySpecialist', '*
+          Database indicators detected? → Invoke SQLInjectionSpecialist', '* SSH service open? → Invoke SSHNetworkSpecialist',
+        '* Authentication mechanisms found? → Invoke AuthenticationSpecialist', '* Cloud-hosted (AWS/Azure/GCP)? → Invoke
+          CloudSecuritySpecialist', '* HTTPS detected? → Invoke CryptographySpecialist', '* WordPress/Joomla/Drupal detected?
+          → Invoke CMSSecuritySpecialist', '* Docker/Kubernetes detected? → Invoke ContainerSecuritySpecialist', '* Mobile
+          app endpoints provided? → Invoke MobileSecuritySpecialist', '- You can invoke multiple specialists in parallel when
+          appropriate', '- Analyze results from each agent', '- If vulnerabilities are found, document them and continue testing',
+        4. ITERATION & DEEP DIVE, '- If you discover new attack vectors or entry points, DO NOT STOP', '- Gather additional
+          intelligence if needed (invoke ReconAgent again)', '- Try alternative approaches if initial tests fail', '- Continue
+          until you''ve thoroughly tested all discovered attack surfaces', 5. COMPREHENSIVE REPORTING, '- Once audit is complete,
+          invoke ReportAgent to generate findings', '- Ensure ALL vulnerabilities and attempts are documented', 'DECISION-MAKING
+          PRINCIPLES:', '- Think strategically like a real penetration tester', '- Don''t follow a rigid sequence - adapt
+          based on what you find', '- Invoke agents in parallel when possible for efficiency', '- Be thorough: test every
+          discovered service and endpoint', '- Iterate: if new information is discovered, adjust your approach', '- Document
+          everything: successes and failures', 'IMPORTANT:', '- You have FULL AUTONOMY to decide which agents to invoke and
+          when', '- There is NO fixed sequence - you decide the strategy', '- You can invoke the same agent multiple times
+          if needed', '- Parallel invocation is encouraged when appropriate', '- Stop only when you''ve completed a thorough
+          security assessment']
+      global_instruction: ['Maintain a professional, methodical approach.', '- Always explain your strategic thinking before
+          invoking agents', '- Provide brief summaries after each agent completes', '- Use clear, concise language', '- Act
+          decisively - don''t ask for permission, take action']
+      planner: BuiltInPlanner
+      description: Autonomous Senior Security Consultant that conducts comprehensive penetration tests
+      sub_agents: [validation_agent, AuditLoop, report_agent]
+  planner_agent:
+    type: instance
+    models: [gemini-1.5-flash-latest]
+    tools: [simple_create_attack_plan_tool]
+    params:
+      name: PlannerAgent
+      instruction: [Your task is to analyze reconnaissance data and create an attack plan., '1. First, explicitly mention
+          what you''re doing: "PlannerAgent is analyzing reconnaissance data..."', 2. **DO NOT ATTEMPT** to use Python functions
+          like `locals()` or `print()` - these are not available to you., '3. Instead, look at the reconnaissance data and
+          analyze it directly. You do not need to print or debug anything.', 4. Create an attack plan by calling `simple_create_attack_plan()`
+          - with NO parameters., '5. After the plan is created, briefly report that planning is complete.', 'IMPORTANT: DO
+          NOT TRY TO DEBUG THE SYSTEM OR USE ANY PYTHON FUNCTIONS LIKE `locals()`, `print()`, etc.', They will cause errors
+          if attempted. Just analyze the data you have access to.]
+      output_key: attack_plan
+      description: Analyzes reconnaissance data and creates an attack plan.
+  recon_agent:
+    type: instance
+    models: [gemini-1.5-flash-latest]
+    tools: [perform_parallel_recon_tool, perform_nmap_scan_tool, perform_dns_recon_tool, GoogleSearchTool]
+    params:
+      name: ReconAgent
+      instruction: [Your task is to perform reconnaissance on the target provided in the session state key 'initial_target'.,
+        '1. First, explicitly mention the target you found in the session state. For example: "Starting reconnaissance on
+          target: example.com"', '2. IMPORTANT: If you can''t find a target in the session state, look at the user''s most
+          recent message to infer the target.', 'For example, if the user said "example.com", use that as the target directly.',
+        '3. Use the perform_parallel_recon tool to run all reconnaissance methods (nmap, dns, web search) concurrently.',
+        This tool automatically runs everything in parallel and combines the results., '4. When calling the tool, ALWAYS explicitly
+          pass the target as a parameter to ensure it receives the correct value:', perform_parallel_recon(direct_target_override="the_target"),
+        '5. After the tool completes, briefly summarize what was found from each method. Even if some methods failed, others
+          may have succeeded.', 6. **Do not perform planning or exploitation.** Your only job is reconnaissance.]
+      output_key: recon_results
+      description: Performs parallel reconnaissance on the target from state['initial_target'].
+  report_agent:
+    type: instance
+    models: [gemini-1.5-flash-latest]
+    tools: [simple_generate_final_report_tool]
+    params:
+      name: ReportAgent
+      instruction: ['You are a security report generator. Your job is to:', '1. Examine all data from previous stages (reconnaissance,
+          planning, exploitation)', 2. Use the simple_generate_final_report tool to create a comprehensive security report,
+        '3. Ensure the report includes all findings, vulnerabilities, and recommendations', '4. Be clear, concise, and professional
+          in your reporting style', The report should be suitable for both technical and non-technical stakeholders.]
+      output_key: final_report
+      description: Generates a comprehensive security report based on all findings
+  sql_injection_agent:
+    type: instance
+    models: [gemini-1.5-flash-latest]
+    tools: [simple_run_sql_exploits, GoogleSearchTool]
+    params:
+      name: SQLInjectionSpecialist
+      instruction: [You are a Database Security Specialist with expert-level knowledge of SQL Injection attacks., 'YOUR EXPERTISE:',
+        '- Classic/Error-based SQL Injection', '- Boolean-based Blind SQL Injection', '- Time-based Blind SQL Injection',
+        '- UNION-based SQL Injection', '- Stacked queries', '- Out-of-band SQL Injection', '- Second-order SQL Injection',
+        '- Database fingerprinting', '- Data extraction techniques', 'YOUR WORKFLOW:', '1. Identify potential injection points
+          (forms, URL parameters, headers, cookies)', 2. Test for basic SQL injection first (error-based detection), '3. If
+          blocked, try blind injection techniques (boolean, time-based)', '4. If injection confirmed, enumerate database structure:',
+        '- Database type and version', '- Table and column names', '- Extractable data', 5. Document findings with complete
+          technical details, 'TESTING METHODOLOGY:', '- Start with simple payloads ('' OR ''1''=''1, etc.)', '- Test both
+          GET and POST parameters', '- Try different SQL comment styles (-- , #, /**/)', '- Test with different encodings
+          if basic payloads fail', '- Use time-based blind injection when others fail', '- Validate exploitability before
+          reporting', 'DATABASE SYSTEMS KNOWLEDGE:', '- MySQL/MariaDB specific syntax and functions', '- PostgreSQL specific
+          techniques', '- MSSQL specific approaches', '- SQLite limitations and techniques', '- Oracle database exploitation',
+        'IMPORTANT:', '- Always validate findings before reporting', '- Provide severity assessment based on exploitability',
+        '- Include database enumeration results', '- Suggest specific remediation (parameterized queries, input validation)',
+        '- Document which payloads worked and which didn''t']
+      output_key: sqli_results
+      description: Expert in SQL Injection detection and exploitation across all major database systems
+  ssh_network_agent:
+    type: instance
+    models: [gemini-1.5-flash-latest]
+    tools: [simple_run_ssh_exploits, GoogleSearchTool]
+    params:
+      name: SSHNetworkSpecialist
+      instruction: [You are a Network and SSH Security Specialist focused on server-level security., 'YOUR EXPERTISE:', '-
+          SSH configuration security analysis', '- SSH vulnerability detection', '- Default and weak credential testing',
+        '- Network service enumeration', '- Service-specific vulnerability testing', '- Authentication mechanism analysis',
+        '- Encryption and protocol security', 'YOUR WORKFLOW:', 1. Review discovered network services from reconnaissance,
+        2. Focus on SSH services (port 22 or custom ports), '3. Perform SSH security audit:', '- Configuration analysis',
+        '- Supported authentication methods', '- Encryption algorithms', '- Known vulnerabilities', 4. Test for weak/default
+          credentials (responsibly), 5. Document all security findings, 'TESTING APPROACH:', '- Analyze SSH banner and version
+          information', '- Check for deprecated SSH versions (SSH-1)', '- Review authentication methods (password, key, etc.)',
+        '- Test for weak encryption algorithms', '- Verify security best practices', '- Check for known CVEs in detected versions',
+        'IMPORTANT:', '- Focus on configuration issues and known vulnerabilities', '- Do NOT conduct aggressive brute-force
+          attacks', '- Document security posture comprehensively', '- Provide specific remediation recommendations', '- Consider
+          compliance requirements (PCI-DSS, SOC2, etc.)']
+      output_key: ssh_network_results
+      description: Expert in SSH and network service security assessment
+  validation_agent:
+    type: instance
+    models: [gemini-1.5-flash-latest]
+    params:
+      name: ValidationAgent
+      instruction: [You are a target validation agent for a security reconnaissance system., 1. Ask the user for a target
+          domain or IP address to analyze., '2. Once they provide a target, validate that it looks like a domain or IP address.',
+        '3. When the user provides a valid target, store it directly in session state using:', 'context.session.state[''initial_target'']
+          = user_input', '4. After storing the target, tell the user: "Target ''[target]'' confirmed and stored. Validation
+          complete. Handing over to Reconnaissance Agent..."', '5. If the user provides an invalid target, ask them to provide
+          a proper domain or IP address.', 'Example conversation flow:', 'User: example.com', 'You: [Store example.com in
+          session state]', 'You: "Target ''example.com'' confirmed and stored. Validation complete. Handing over to Reconnaissance
+          Agent..."']
+      output_key: validation_result
+      description: Validates the target domain/IP and stores it in session state.
+  web_security_agent:
+    type: instance
+    models: [gemini-1.5-flash-latest]
+    tools: [test_xss_comprehensive, test_dom_xss, test_csrf_protection, test_ssrf_vulnerabilities, test_path_traversal, test_open_redirect,
+      test_security_headers, headless_crawl_site, detect_directory_listing, simple_run_web_exploits, GoogleSearchTool]
+    params:
+      name: WebSecuritySpecialist
+      instruction: [You are a Senior Web Application Security Specialist with expertise in OWASP Top 10 and advanced web exploitation
+          techniques., 'YOUR EXPERTISE (State-of-the-Art 2025):', '- **Cross-Site Scripting (XSS)**: Reflected, Stored, DOM-based,
+          mutation XSS, prototype pollution', '- **Cross-Site Request Forgery (CSRF)**: Token bypass, SameSite bypass', '-
+          **Server-Side Request Forgery (SSRF)**: AWS/Azure/GCP metadata access, internal network pivoting', '- **Path Traversal**:
+          Directory traversal, file inclusion, zip slip', '- **Open Redirect**: Header injection, URL confusion attacks',
+        '- **Security Headers**: CSP, HSTS, X-Frame-Options, Permissions-Policy', '- **HTTP Security**: Insecure methods,
+          verbose errors, information disclosure', 'YOUR COMPREHENSIVE TESTING WORKFLOW:', 1. **Initial Assessment**, '- Analyze
+          target''s web technologies from recon', '- Identify attack surfaces (forms, parameters, endpoints, APIs)', '- Review
+          HTTP security headers', 2. **XSS Testing** (Multiple Vectors), '- Test reflected XSS in URL parameters, headers,
+          forms', '- Analyze JavaScript code for DOM XSS sinks', '- Test stored XSS in user inputs', '- Try encoding bypass
+          techniques (HTML entities, Unicode, double encoding)', '- Test event handlers and various HTML contexts', 3. **CSRF
+          Protection Testing**, '- Check for anti-CSRF tokens in POST forms', '- Test SameSite cookie attributes', '- Attempt
+          token prediction/bypass', '- Test referer header validation', 4. **SSRF Testing**, '- Test URL parameters for SSRF
+          (localhost, internal IPs, cloud metadata)', '- Try protocol handlers (file://, dict://, gopher://)', '- Test blind
+          SSRF with out-of-band callbacks', 5. **Path Traversal Testing**, '- Test file parameters with ../../../etc/passwd',
+        '- Try encoding variations (%2e%2e%2f, ..%252f, etc.)', '- Test Windows paths (..\..\windows\)', '- Check for zip
+          slip in file uploads', 6. **Open Redirect Testing**, '- Test redirect parameters with external domains', '- Try
+          URL confusion techniques (//evil.com, @evil.com)', '- Test header injection via redirect', 7. **Security Headers
+          Analysis**, '- Check for missing or misconfigured security headers', '- Validate CSP effectiveness', '- Test for
+          clickjacking protection', 8. **Dynamic Crawling & Directory Listing**, '- Use a headless browser to crawl the site
+          map and discover dynamic routes', '- Identify and report Apache/Nginx-style directory listings ("Index of /")',
+        'REPORTING REQUIREMENTS:', '- Document EVERY test performed (pass or fail)', '- For vulnerabilities found:', '* Type
+          and CVSS severity score', '* Affected URL/endpoint', '* Working proof-of-concept payload', '* Business impact assessment',
+        '* Detailed remediation steps', '- For secure implementations, note what protections are in place', 'TESTING METHODOLOGY:',
+        '- Use comprehensive tool suite for systematic testing', '- Try multiple payloads per vulnerability type', '- Test
+          edge cases and encoding variations', '- Verify each finding before reporting', '- Balance thoroughness with efficiency']
+      output_key: web_security_results
+      description: State-of-the-art web application security specialist (XSS, CSRF, SSRF, Path Traversal, Security Headers)
+
+models:
+  gemini-1.5-flash-latest:
+    type: literal
+    agents: [validation_agent, recon_agent, planner_agent, exploit_agent, report_agent, web_security_agent, sql_injection_agent,
+      cms_security_agent, container_security_agent, mobile_security_agent, ssh_network_agent, api_security_agent, cloud_security_agent,
+      cryptography_agent, authentication_agent, AggregateFindingsAgent, ContinueDecisionAgent]
+  gemini-1.5-pro-latest:
+    type: literal
+    agents: [orchestrator_agent]
+
+tools:
+  aggregate_findings:
+    type: wrapper
+    params:
+      wrapper: FunctionTool
+      wraps: aggregate_findings
+  analyze_mobile_endpoints:
+    type: wrapper
+    agents: [mobile_security_agent]
+    params:
+      wrapper: FunctionTool
+      wraps: analyze_mobile_endpoints
+      description: |-
+        Analyze provided mobile app endpoint list for insecure patterns.
+        kwargs: endpoints: List[str]
+  detect_cms:
+    type: wrapper
+    agents: [cms_security_agent]
+    params:
+      wrapper: FunctionTool
+      wraps: detect_cms
+  detect_directory_listing:
+    type: wrapper
+    agents: [web_security_agent]
+    params:
+      wrapper: FunctionTool
+      wraps: detect_directory_listing
+      description: |-
+        Use headless browser to identify directory listing pages (Apache/Nginx style 'Index of /').
+        If a crawl was performed, use those pages; otherwise check root and common directories.
+  drupal_quick_audit:
+    type: wrapper
+    agents: [cms_security_agent]
+    params:
+      wrapper: FunctionTool
+      wraps: drupal_quick_audit
+  exit_loop:
+    type: wrapper
+    params:
+      wrapper: FunctionTool
+      wraps: exit_loop
+  headless_crawl_site:
+    type: wrapper
+    agents: [web_security_agent]
+    params:
+      wrapper: FunctionTool
+      wraps: headless_crawl_site
+      description: |-
+        Crawl the target website using a headless browser to discover links, forms, and structure.
+        Args:
+          start_path: optional path to start from
+          max_pages: int (default 200)
+          same_origin_only: bool (default True)
+  joomla_quick_audit:
+    type: wrapper
+    agents: [cms_security_agent]
+    params:
+      wrapper: FunctionTool
+      wraps: joomla_quick_audit
+  perform_dns_recon_tool:
+    type: function
+    agents: [recon_agent]
+  perform_nmap_scan_tool:
+    type: function
+    agents: [recon_agent]
+  perform_parallel_recon_tool:
+    type: function
+    agents: [recon_agent]
+  should_continue_audit:
+    type: wrapper
+    params:
+      wrapper: FunctionTool
+      wraps: should_continue_audit
+      description: |-
+        Decide if we should continue another loop iteration.
+        Criteria:
+          - Stop if iterations exceed max_iterations (default 5)
+          - Stop if no_new_findings_threshold consecutive iterations with zero delta findings (default 2)
+          - Stop if agent coverage threshold met and no critical/high findings remain
+  simple_create_attack_plan_tool:
+    type: function
+    agents: [planner_agent]
+  simple_decide_next_exploit_tool:
+    type: function
+    agents: [exploit_agent]
+  simple_generate_final_report_tool:
+    type: function
+    agents: [report_agent]
+  simple_run_sql_exploits:
+    type: wrapper
+    agents: [sql_injection_agent]
+    params:
+      wrapper: FunctionTool
+      wraps: simple_run_sql_exploits
+      description: |-
+        A greatly simplified wrapper for run_sql_exploits with minimal parameter declarations
+        to help ADK's automatic function calling.
+
+        Returns:
+            Results from SQL exploits
+  simple_run_sql_exploits_tool:
+    type: function
+    agents: [exploit_agent]
+  simple_run_ssh_exploits:
+    type: wrapper
+    agents: [ssh_network_agent]
+    params:
+      wrapper: FunctionTool
+      wraps: simple_run_ssh_exploits
+      description: |-
+        A greatly simplified wrapper for run_ssh_exploits with minimal parameter declarations
+        to help ADK's automatic function calling.
+
+        Returns:
+            Results from SSH exploits
+  simple_run_ssh_exploits_tool:
+    type: function
+    agents: [exploit_agent]
+  simple_run_web_exploits:
+    type: wrapper
+    agents: [web_security_agent]
+    params:
+      wrapper: FunctionTool
+      wraps: simple_run_web_exploits
+      description: |-
+        A greatly simplified wrapper for run_web_exploits with minimal parameter declarations
+        to help ADK's automatic function calling.
+
+        Returns:
+            Results from web exploits
+  simple_run_web_exploits_tool:
+    type: function
+    agents: [exploit_agent]
+  test_api_authentication:
+    type: wrapper
+    agents: [api_security_agent, authentication_agent]
+    params:
+      wrapper: FunctionTool
+      wraps: test_api_authentication
+      description: Tests REST API authentication mechanisms for weaknesses.
+  test_api_authorization:
+    type: wrapper
+    agents: [api_security_agent, authentication_agent]
+    params:
+      wrapper: FunctionTool
+      wraps: test_api_authorization
+      description: Tests for broken object level authorization (BOLA/IDOR) in APIs.
+  test_api_rate_limiting:
+    type: wrapper
+    agents: [api_security_agent]
+    params:
+      wrapper: FunctionTool
+      wraps: test_api_rate_limiting
+      description: Tests for API rate limiting and DoS protection.
+  test_api_versioning:
+    type: wrapper
+    agents: [api_security_agent]
+    params:
+      wrapper: FunctionTool
+      wraps: test_api_versioning
+      description: Tests for insecure API versioning practices.
+  test_certificate_validation:
+    type: wrapper
+    agents: [cryptography_agent]
+    params:
+      wrapper: FunctionTool
+      wraps: test_certificate_validation
+      description: Tests SSL certificate validation and common issues.
+  test_cloud_metadata_exposure:
+    type: wrapper
+    agents: [cloud_security_agent]
+    params:
+      wrapper: FunctionTool
+      wraps: test_cloud_metadata_exposure
+      description: Tests for exposed cloud metadata endpoints (SSRF to metadata services).
+  test_csrf_protection:
+    type: wrapper
+    agents: [web_security_agent]
+    params:
+      wrapper: FunctionTool
+      wraps: test_csrf_protection
+      description: Tests for CSRF protection mechanisms (tokens, SameSite cookies, etc.)
+  test_docker_api_exposure:
+    type: wrapper
+    agents: [container_security_agent]
+    params:
+      wrapper: FunctionTool
+      wraps: test_docker_api_exposure
+  test_dom_xss:
+    type: wrapper
+    agents: [web_security_agent]
+    params:
+      wrapper: FunctionTool
+      wraps: test_dom_xss
+      description: Tests for DOM-based XSS vulnerabilities by analyzing JavaScript code.
+  test_encryption_at_rest:
+    type: wrapper
+    agents: [cryptography_agent]
+    params:
+      wrapper: FunctionTool
+      wraps: test_encryption_at_rest
+      description: Tests for data encryption at rest (database encryption, etc.).
+  test_graphql_security:
+    type: wrapper
+    agents: [api_security_agent]
+    params:
+      wrapper: FunctionTool
+      wraps: test_graphql_security
+      description: Tests GraphQL endpoints for security issues.
+  test_jwt_vulnerabilities:
+    type: wrapper
+    agents: [api_security_agent, authentication_agent]
+    params:
+      wrapper: FunctionTool
+      wraps: test_jwt_vulnerabilities
+      description: Tests JWT tokens for common vulnerabilities.
+  test_kubernetes_api_exposure:
+    type: wrapper
+    agents: [container_security_agent]
+    params:
+      wrapper: FunctionTool
+      wraps: test_kubernetes_api_exposure
+  test_open_redirect:
+    type: wrapper
+    agents: [web_security_agent]
+    params:
+      wrapper: FunctionTool
+      wraps: test_open_redirect
+      description: Tests for open redirect vulnerabilities.
+  test_password_hashing:
+    type: wrapper
+    agents: [cryptography_agent]
+    params:
+      wrapper: FunctionTool
+      wraps: test_password_hashing
+      description: Tests for weak password hashing (if password hashes are leaked/accessible).
+  test_path_traversal:
+    type: wrapper
+    agents: [web_security_agent]
+    params:
+      wrapper: FunctionTool
+      wraps: test_path_traversal
+      description: Tests for path/directory traversal vulnerabilities.
+  test_s3_bucket_permissions:
+    type: wrapper
+    agents: [cloud_security_agent]
+    params:
+      wrapper: FunctionTool
+      wraps: test_s3_bucket_permissions
+      description: Tests for misconfigured S3 buckets (public read/write).
+  test_security_headers:
+    type: wrapper
+    agents: [web_security_agent]
+    params:
+      wrapper: FunctionTool
+      wraps: test_security_headers
+      description: Analyzes HTTP security headers.
+  test_ssrf_vulnerabilities:
+    type: wrapper
+    agents: [web_security_agent]
+    params:
+      wrapper: FunctionTool
+      wraps: test_ssrf_vulnerabilities
+      description: Tests for Server-Side Request Forgery vulnerabilities.
+  test_tls_configuration:
+    type: wrapper
+    agents: [cryptography_agent]
+    params:
+      wrapper: FunctionTool
+      wraps: test_tls_configuration
+      description: Tests TLS/SSL configuration for weak ciphers, protocols, and certificate issues.
+  test_xss_comprehensive:
+    type: wrapper
+    agents: [web_security_agent]
+    params:
+      wrapper: FunctionTool
+      wraps: test_xss_comprehensive
+      description: |-
+        Comprehensive XSS testing across multiple vectors and encoding types.
+        Tests: Reflected XSS, Stored XSS, DOM-based XSS
+  wordpress_quick_audit:
+    type: wrapper
+    agents: [cms_security_agent]
+    params:
+      wrapper: FunctionTool
+      wraps: wordpress_quick_audit
+
+teams:
+  orchestrator_agent:
+    type: hierarchy
+    agents: [orchestrator_agent, validation_agent, AuditLoop, report_agent]
+
+imports:
+  _ensure_serializable: agents.planner_logic._ensure_serializable
+  _genai_types: google.genai.types
+  _get_from_global_cache: google.adk.sessions.in_memory_session_service._get_from_global_cache
+  _os: os
+  _run_command_detailed: phantomrecon.executor_fix.run_command_detailed
+  _set_in_global_cache: google.adk.sessions.in_memory_session_service._set_in_global_cache
+  agent: agent.orchestrator_agent
+  Agent: google.adk.agents.Agent
+  aggregate_findings: phantomrecon.agents.audit_control_tools.aggregate_findings
+  aiohttp: aiohttp
+  analyze_mobile_endpoints: phantomrecon.agents.tools_mobile_security.analyze_mobile_endpoints
+  Any: typing.Any
+  api_security_agent: phantomrecon.agents.specialist_agents.api_security_agent
+  argparse: argparse
+  asyncio: asyncio
+  authentication_agent: phantomrecon.agents.specialist_agents.authentication_agent
+  base64: base64
+  BeautifulSoup: bs4.BeautifulSoup
+  box: rich.box
+  BuiltInPlanner: google.adk.planners.BuiltInPlanner
+  By: selenium.webdriver.common.by.By
+  ChromeOptions: selenium.webdriver.chrome.options.Options
+  cloud_security_agent: phantomrecon.agents.specialist_agents.cloud_security_agent
+  cms_security_agent: phantomrecon.agents.specialist_agents.cms_security_agent
+  Comment: bs4.Comment
+  connector: mysql.connector
+  Console: rich.console.Console
+  container_security_agent: phantomrecon.agents.specialist_agents.container_security_agent
+  cryptography_agent: phantomrecon.agents.specialist_agents.cryptography_agent
+  datetime: datetime.datetime
+  detect_cms: phantomrecon.agents.tools_cms_security.detect_cms
+  detect_directory_listing: phantomrecon.agents.tools_web_security.detect_directory_listing
+  Dict: typing.Dict
+  drupal_quick_audit: phantomrecon.agents.tools_cms_security.drupal_quick_audit
+  exit_loop: google.adk.tools.exit_loop_tool.exit_loop
+  FunctionTool: google.adk.tools.FunctionTool
+  genai_types: google.genai.types
+  GoogleSearchTool: google.adk.tools.google_search_tool.GoogleSearchTool
+  hashlib: hashlib
+  headless_crawl_site: phantomrecon.agents.tools_web_security.headless_crawl_site
+  hmac: hmac
+  ipaddress: ipaddress
+  joomla_quick_audit: phantomrecon.agents.tools_cms_security.joomla_quick_audit
+  json: json
+  jwt: jwt
+  List: typing.List
+  Live: rich.live.Live
+  LlmAgent: google.adk.agents.LlmAgent
+  load_dotenv: dotenv.load_dotenv
+  logging: logging
+  LoopAgent: google.adk.agents.LoopAgent
+  markdown2: markdown2
+  mobile_security_agent: phantomrecon.agents.specialist_agents.mobile_security_agent
+  nmap: nmap
+  Optional: typing.Optional
+  orchestrator_agent: phantomrecon.agent.orchestrator_agent
+  os: os
+  ParallelAgent: google.adk.agents.ParallelAgent
+  paramiko: paramiko
+  parse_qs: urllib.parse.parse_qs
+  perform_dns_recon: phantomrecon.agents.recon_logic.perform_dns_recon
+  perform_nmap_scan: phantomrecon.agents.recon_logic.perform_nmap_scan
+  perform_parallel_recon: phantomrecon.agents.recon_logic.perform_parallel_recon
+  pickle: pickle
+  psycopg2: psycopg2
+  quote: urllib.parse.quote
+  re: re
+  requests: requests
+  root_agent: agent.orchestrator_agent
+  run_command: phantomrecon.executor_fix.run_command
+  run_command_detailed: phantomrecon.executor_fix.run_command_detailed
+  SequentialAgent: google.adk.agents.SequentialAgent
+  Session: google.adk.sessions.Session
+  Set: typing.Set
+  shlex: shlex
+  should_continue_audit: phantomrecon.agents.audit_control_tools.should_continue_audit
+  shutil: shutil
+  simple_create_attack_plan: phantomrecon.agents.planner_logic.simple_create_attack_plan
+  simple_decide_next_exploit: phantomrecon.agents.routing_logic.simple_decide_next_exploit
+  simple_generate_final_report: phantomrecon.agents.report_logic.simple_generate_final_report
+  simple_run_sql_exploits: phantomrecon.agents.exploit_sql_logic.simple_run_sql_exploits
+  simple_run_ssh_exploits: phantomrecon.agents.exploit_ssh_logic.simple_run_ssh_exploits
+  simple_run_web_exploits: phantomrecon.agents.exploit_web_logic.simple_run_web_exploits
+  socket: socket
+  Spinner: rich.spinner.Spinner
+  sql_injection_agent: phantomrecon.agents.specialist_agents.sql_injection_agent
+  ssh_network_agent: phantomrecon.agents.specialist_agents.ssh_network_agent
+  ssl: ssl
+  subprocess: subprocess
+  sys: sys
+  Table: rich.table.Table
+  tempfile: tempfile
+  test_api_authentication: phantomrecon.agents.tools_api_security.test_api_authentication
+  test_api_authorization: phantomrecon.agents.tools_api_security.test_api_authorization
+  test_api_rate_limiting: phantomrecon.agents.tools_api_security.test_api_rate_limiting
+  test_api_versioning: phantomrecon.agents.tools_api_security.test_api_versioning
+  test_certificate_validation: phantomrecon.agents.tools_cloud_crypto.test_certificate_validation
+  test_cloud_metadata_exposure: phantomrecon.agents.tools_cloud_crypto.test_cloud_metadata_exposure
+  test_csrf_protection: phantomrecon.agents.tools_web_security.test_csrf_protection
+  test_docker_api_exposure: phantomrecon.agents.tools_container_security.test_docker_api_exposure
+  test_dom_xss: phantomrecon.agents.tools_web_security.test_dom_xss
+  test_encryption_at_rest: phantomrecon.agents.tools_cloud_crypto.test_encryption_at_rest
+  test_graphql_security: phantomrecon.agents.tools_api_security.test_graphql_security
+  test_jwt_vulnerabilities: phantomrecon.agents.tools_api_security.test_jwt_vulnerabilities
+  test_kubernetes_api_exposure: phantomrecon.agents.tools_container_security.test_kubernetes_api_exposure
+  test_open_redirect: phantomrecon.agents.tools_web_security.test_open_redirect
+  test_password_hashing: phantomrecon.agents.tools_cloud_crypto.test_password_hashing
+  test_path_traversal: phantomrecon.agents.tools_web_security.test_path_traversal
+  test_s3_bucket_permissions: phantomrecon.agents.tools_cloud_crypto.test_s3_bucket_permissions
+  test_security_headers: phantomrecon.agents.tools_web_security.test_security_headers
+  test_ssrf_vulnerabilities: phantomrecon.agents.tools_web_security.test_ssrf_vulnerabilities
+  test_tls_configuration: phantomrecon.agents.tools_cloud_crypto.test_tls_configuration
+  test_xss_comprehensive: phantomrecon.agents.tools_web_security.test_xss_comprehensive
+  Text: rich.text.Text
+  time: time
+  ToolContext: google.adk.tools.ToolContext
+  Tuple: typing.Tuple
+  Union: typing.Union
+  UnsafeLocalCodeExecutor: google.adk.code_executors.UnsafeLocalCodeExecutor
+  urlencode: urllib.parse.urlencode
+  urljoin: urllib.parse.urljoin
+  urllib3: urllib3
+  urlparse: urllib.parse.urlparse
+  urlunparse: urllib.parse.urlunparse
+  validate_attack_plan: phantomrecon.agents.validation_logic.validate_attack_plan
+  web_security_agent: phantomrecon.agents.specialist_agents.web_security_agent
+  webdriver: selenium.webdriver
+  wordpress_quick_audit: phantomrecon.agents.tools_cms_security.wordpress_quick_audit
+
+functions:
+  __init__:
+    type: sync
+    module: phantomrecon.__main__
+    args: [self, session]
+  _analyze_single_url:
+    type: async
+    module: phantomrecon.agents.recon_logic
+    args: [session, url]
+  _build_markdown_report:
+    type: sync
+    module: phantomrecon.agents.report_logic
+    args: [recon_data, attack_plan, exploit_results, summary_text]
+    params:
+      returns: str
+  _check_default_files:
+    type: sync
+    module: phantomrecon.agents.exploit_web_logic
+    args: [target_info, base_url]
+    params:
+      returns: Dict
+  _check_misconfigurations:
+    type: sync
+    module: phantomrecon.agents.exploit_web_logic
+    args: [target_info, base_url]
+    params:
+      returns: Dict
+  _check_sql_configurations:
+    type: sync
+    module: phantomrecon.agents.exploit_sql_logic
+    args: [target_info, credentials]
+    params:
+      returns: Dict
+  _check_sql_version_vulnerabilities:
+    type: sync
+    module: phantomrecon.agents.exploit_sql_logic
+    args: [target_info]
+    params:
+      returns: Dict
+  _check_ssh_version_vulnerabilities:
+    type: sync
+    module: phantomrecon.agents.exploit_ssh_logic
+    args: [target_info]
+    params:
+      returns: Dict
+  _check_version_vulnerabilities:
+    type: sync
+    module: phantomrecon.agents.exploit_web_logic
+    args: [target_info]
+    params:
+      returns: Dict
+  _ensure_serializable:
+    type: sync
+    module: phantomrecon.agents.planner_logic
+    args: [data]
+  _find_subdomains:
+    type: async
+    module: phantomrecon.agents.recon_logic
+    args: [target, results, max_subdomains]
+    params:
+      returns: None
+  _generate_html_report:
+    type: sync
+    module: phantomrecon.agents.report_logic
+    args: [md_content, html_path]
+  _get_from_global_cache:
+    type: sync
+    module: phantomrecon.agents.planner_logic
+    args: [key, default]
+  _get_state:
+    type: sync
+    module: phantomrecon.agents.audit_control_tools
+    args: [context]
+    params:
+      returns: Dict
+  _init_headless_chrome:
+    type: sync
+    module: phantomrecon.agents.tools_web_security
+    params:
+      returns: Optional[Any]
+  _load_dummy_data:
+    type: sync
+    module: phantomrecon.agents.recon_logic
+    params:
+      returns: Dict
+  _parse_nmap_output:
+    type: sync
+    module: phantomrecon.agents.recon_logic
+    args: [nmap_output]
+    params:
+      returns: Dict
+  _report_misconfigurations:
+    type: sync
+    module: phantomrecon.agents.report_logic
+    args: [misconfigurations_data]
+  _run:
+    type: sync
+    module: phantomrecon.agents.tools_cms_security
+    args: [cmd, timeout]
+    params:
+      returns: tuple
+  _run_command:
+    type: sync
+    module: phantomrecon.agents.exploit_sql_logic
+    args: [command, timeout]
+    params:
+      returns: Tuple
+  _run_command_async:
+    type: async
+    module: phantomrecon.agents.recon_logic
+    args: [command, timeout]
+    params:
+      returns: Tuple
+  _run_command_detailed_async:
+    type: async
+    module: phantomrecon.agents.recon_logic
+    args: [command, timeout]
+    params:
+      returns: Tuple
+  _run_sqlmap_direct_exploit:
+    type: sync
+    module: phantomrecon.agents.exploit_sql_logic
+    args: [target_info, credentials]
+    params:
+      returns: Dict
+  _run_ssh_audit:
+    type: sync
+    module: phantomrecon.agents.exploit_ssh_logic
+    args: [target_info]
+    params:
+      returns: Dict
+  _run_wapiti:
+    type: sync
+    module: phantomrecon.agents.exploit_web_logic
+    args: [base_url, target_info]
+    params:
+      returns: Dict
+  _run_wpscan:
+    type: sync
+    module: phantomrecon.agents.exploit_web_logic
+    args: [base_url, target_info]
+    params:
+      returns: Dict
+  _safe_db_connect:
+    type: sync
+    module: phantomrecon.agents.exploit_sql_logic
+    args: [db_type, host, port, user, password]
+    params:
+      returns: Tuple
+  _safe_request:
+    type: sync
+    module: phantomrecon.agents.recon_logic
+    args: [url, method]
+    params:
+      returns: Optional[requests.Response]
+  _safe_ssh_connect:
+    type: sync
+    module: phantomrecon.agents.exploit_ssh_logic
+    args: [host, port, user, password]
+    params:
+      returns: Tuple
+  _set_in_global_cache:
+    type: sync
+    module: phantomrecon.agents.planner_logic
+    args: [key, value]
+  _standardize_attack_plan:
+    type: sync
+    module: phantomrecon.agents.planner_logic
+    args: [attack_plan]
+  _test_basic_command_injection:
+    type: sync
+    module: phantomrecon.agents.exploit_web_logic
+    args: [context, target_info, base_url]
+    params:
+      returns: Dict
+  _test_basic_sqli:
+    type: sync
+    module: phantomrecon.agents.exploit_web_logic
+    args: [context, target_info, base_url]
+    params:
+      returns: Dict
+  _test_basic_xss:
+    type: sync
+    module: phantomrecon.agents.exploit_web_logic
+    args: [context, target_info, base_url]
+    params:
+      returns: Dict
+  _test_default_credentials:
+    type: sync
+    module: phantomrecon.agents.exploit_sql_logic
+    args: [target_info]
+    params:
+      returns: Dict
+  _test_directory_traversal:
+    type: sync
+    module: phantomrecon.agents.exploit_web_logic
+    args: [target_info, base_url]
+    params:
+      returns: Dict
+  _test_weak_credentials:
+    type: sync
+    module: phantomrecon.agents.exploit_ssh_logic
+    args: [target_info]
+    params:
+      returns: Dict
+  aggregate_findings:
+    type: sync
+    module: phantomrecon.agents.audit_control_tools
+    args: [context]
+    params:
+      returns: Dict
+  aggregate_recon_data:
+    type: sync
+    module: phantomrecon.agents.recon_logic
+    args: [context, parallel_results]
+    params:
+      returns: Dict
+  analyze_mobile_endpoints:
+    type: async
+    module: phantomrecon.agents.tools_mobile_security
+    args: [context]
+    params:
+      returns: Dict
+  analyze_web_content:
+    type: async
+    module: phantomrecon.agents.recon_logic
+    params:
+      returns: Dict
+  banner:
+    type: sync
+    module: phantomrecon.__main__
+  complete_task:
+    type: sync
+    module: phantomrecon.agents.recon_logic
+    args: [self, task_name, success, result]
+  create_attack_plan:
+    type: async
+    module: phantomrecon.agents.planner_logic
+    args: [scan_data, context]
+    params:
+      returns: Dict
+  decide_next_exploit:
+    type: sync
+    module: phantomrecon.agents.routing_logic
+    args: [context]
+    params:
+      returns: str
+  detect_cms:
+    type: async
+    module: phantomrecon.agents.tools_cms_security
+    args: [context]
+    params:
+      returns: Dict
+  detect_directory_listing:
+    type: async
+    module: phantomrecon.agents.tools_web_security
+    args: [context]
+    params:
+      returns: Dict
+  dns_task:
+    type: async
+    module: phantomrecon.agents.recon_logic
+  drupal_quick_audit:
+    type: async
+    module: phantomrecon.agents.tools_cms_security
+    args: [context]
+    params:
+      returns: Dict
+  generate:
+    type: sync
+    module: phantomrecon.agents.report_logic
+    args: [self, recon_data, attack_plan, exploit_results]
+  generate_final_report:
+    type: sync
+    module: phantomrecon.agents.report_logic
+    args: [context]
+    params:
+      returns: Dict
+  generate_table:
+    type: sync
+    module: phantomrecon.agents.recon_logic
+    args: [self]
+    params:
+      returns: Table
+  generate_vulnerability_profile:
+    type: sync
+    module: phantomrecon.agents.report_logic
+    args: [attack_plan, nmap_results]
+    params:
+      returns: str
+  get_elapsed:
+    type: sync
+    module: phantomrecon.agents.recon_logic
+    args: [self, task_name]
+    params:
+      returns: str
+  get_global_state:
+    type: sync
+    module: phantomrecon.agents.planner_logic
+    args: [context]
+    params:
+      returns: Dict
+  get_recon_info:
+    type: sync
+    module: phantomrecon.agents.exploit_sql_logic
+    args: [host, port]
+  get_ssh_recon_info:
+    type: sync
+    module: phantomrecon.agents.exploit_ssh_logic
+    args: [host, port]
+  headless_crawl_site:
+    type: async
+    module: phantomrecon.agents.tools_web_security
+    args: [context]
+    params:
+      returns: Dict
+  interactive_console:
+    type: sync
+    module: phantomrecon.__main__
+  joomla_quick_audit:
+    type: async
+    module: phantomrecon.agents.tools_cms_security
+    args: [context]
+    params:
+      returns: Dict
+  load_prompt:
+    type: sync
+    module: phantomrecon.agent
+    args: [filename]
+    params:
+      returns: str
+  main:
+    type: sync
+    module: phantomrecon.__main__
+  menu:
+    type: sync
+    module: phantomrecon.__main__
+  nmap_task:
+    type: async
+    module: phantomrecon.agents.recon_logic
+  perform_dns_recon:
+    type: async
+    module: phantomrecon.agents.recon_logic
+    params:
+      returns: Dict
+  perform_nmap_scan:
+    type: async
+    module: phantomrecon.agents.recon_logic
+    params:
+      returns: Dict
+  perform_parallel_recon:
+    type: async
+    module: phantomrecon.agents.recon_logic
+    params:
+      returns: Dict
+  prompt:
+    type: sync
+    module: phantomrecon.__main__
+    params:
+      returns: str
+  report_service_summary:
+    type: sync
+    module: phantomrecon.agents.report_logic
+    args: [attack_plan]
+    params:
+      returns: str
+  run_assessments:
+    type: async
+    module: phantomrecon.__main__
+    args: [ctx]
+    params:
+      returns: list[Dict]
+  run_auto:
+    type: async
+    module: phantomrecon.__main__
+    args: [ctx, target]
+    params:
+      returns: Dict
+  run_command:
+    type: async
+    module: phantomrecon.executor_fix
+    args: [command, timeout]
+    params:
+      returns: Tuple
+  run_command_detailed:
+    type: async
+    module: phantomrecon.executor_fix
+    args: [command, timeout]
+    params:
+      returns: Tuple
+  run_command_detailed_sync:
+    type: sync
+    module: phantomrecon.executor_fix
+    args: [command, timeout]
+    params:
+      returns: Tuple
+  run_command_sync:
+    type: sync
+    module: phantomrecon.executor_fix
+    args: [command, timeout]
+    params:
+      returns: Tuple
+  run_plan:
+    type: async
+    module: phantomrecon.__main__
+    args: [ctx, recon_data]
+    params:
+      returns: Dict
+  run_recon:
+    type: async
+    module: phantomrecon.__main__
+    args: [ctx, target]
+    params:
+      returns: Dict
+  run_report:
+    type: sync
+    module: phantomrecon.__main__
+    args: [ctx]
+  run_route:
+    type: sync
+    module: phantomrecon.__main__
+    args: [ctx]
+  run_sql_exploits:
+    type: sync
+    module: phantomrecon.agents.exploit_sql_logic
+    args: [context]
+    params:
+      returns: List[Dict]
+  run_ssh_exploits:
+    type: sync
+    module: phantomrecon.agents.exploit_ssh_logic
+    args: [context]
+    params:
+      returns: List[Dict]
+  run_web_exploits:
+    type: sync
+    module: phantomrecon.agents.exploit_web_logic
+    args: [context]
+    params:
+      returns: List[Dict]
+  should_continue_audit:
+    type: sync
+    module: phantomrecon.agents.audit_control_tools
+    args: [context]
+    params:
+      returns: Dict
+  simple_create_attack_plan:
+    type: async
+    module: phantomrecon.agents.planner_logic
+  simple_decide_next_exploit:
+    type: sync
+    module: phantomrecon.agents.routing_logic
+    params:
+      returns: Optional[str]
+  simple_generate_final_report:
+    type: sync
+    module: phantomrecon.agents.report_logic
+  simple_run_sql_exploits:
+    type: sync
+    module: phantomrecon.agents.exploit_sql_logic
+  simple_run_ssh_exploits:
+    type: sync
+    module: phantomrecon.agents.exploit_ssh_logic
+  simple_run_web_exploits:
+    type: sync
+    module: phantomrecon.agents.exploit_web_logic
+  start_task:
+    type: sync
+    module: phantomrecon.agents.recon_logic
+    args: [self, task_name]
+  test_api_authentication:
+    type: async
+    module: phantomrecon.agents.tools_api_security
+    args: [context]
+    params:
+      returns: Dict
+  test_api_authorization:
+    type: async
+    module: phantomrecon.agents.tools_api_security
+    args: [context]
+    params:
+      returns: Dict
+  test_api_rate_limiting:
+    type: async
+    module: phantomrecon.agents.tools_api_security
+    args: [context]
+    params:
+      returns: Dict
+  test_api_versioning:
+    type: async
+    module: phantomrecon.agents.tools_api_security
+    args: [context]
+    params:
+      returns: Dict
+  test_certificate_validation:
+    type: async
+    module: phantomrecon.agents.tools_cloud_crypto
+    args: [context]
+    params:
+      returns: Dict
+  test_cloud_metadata_exposure:
+    type: async
+    module: phantomrecon.agents.tools_cloud_crypto
+    args: [context]
+    params:
+      returns: Dict
+  test_csrf_protection:
+    type: async
+    module: phantomrecon.agents.tools_web_security
+    args: [context]
+    params:
+      returns: Dict
+  test_docker_api_exposure:
+    type: async
+    module: phantomrecon.agents.tools_container_security
+    args: [context]
+    params:
+      returns: Dict
+  test_dom_xss:
+    type: async
+    module: phantomrecon.agents.tools_web_security
+    args: [context]
+    params:
+      returns: Dict
+  test_encryption_at_rest:
+    type: async
+    module: phantomrecon.agents.tools_cloud_crypto
+    args: [context]
+    params:
+      returns: Dict
+  test_graphql_security:
+    type: async
+    module: phantomrecon.agents.tools_api_security
+    args: [context]
+    params:
+      returns: Dict
+  test_jwt_vulnerabilities:
+    type: async
+    module: phantomrecon.agents.tools_api_security
+    args: [context]
+    params:
+      returns: Dict
+  test_kubernetes_api_exposure:
+    type: async
+    module: phantomrecon.agents.tools_container_security
+    args: [context]
+    params:
+      returns: Dict
+  test_open_redirect:
+    type: async
+    module: phantomrecon.agents.tools_web_security
+    args: [context]
+    params:
+      returns: Dict
+  test_password_hashing:
+    type: async
+    module: phantomrecon.agents.tools_cloud_crypto
+    args: [context]
+    params:
+      returns: Dict
+  test_path_traversal:
+    type: async
+    module: phantomrecon.agents.tools_web_security
+    args: [context]
+    params:
+      returns: Dict
+  test_s3_bucket_permissions:
+    type: async
+    module: phantomrecon.agents.tools_cloud_crypto
+    args: [context]
+    params:
+      returns: Dict
+  test_security_headers:
+    type: async
+    module: phantomrecon.agents.tools_web_security
+    args: [context]
+    params:
+      returns: Dict
+  test_ssrf_vulnerabilities:
+    type: async
+    module: phantomrecon.agents.tools_web_security
+    args: [context]
+    params:
+      returns: Dict
+  test_tls_configuration:
+    type: async
+    module: phantomrecon.agents.tools_cloud_crypto
+    args: [context]
+    params:
+      returns: Dict
+  test_xss_comprehensive:
+    type: async
+    module: phantomrecon.agents.tools_web_security
+    args: [context]
+    params:
+      returns: Dict
+  validate_attack_plan:
+    type: async
+    module: phantomrecon.agents.validation_logic
+    args: [raw_planner_output]
+    params:
+      returns: Dict
+  wordpress_quick_audit:
+    type: async
+    module: phantomrecon.agents.tools_cms_security
+    args: [context]
+    params:
+      returns: Dict
+
+variables:
+  NMAP_ARGS:
+    type: env
+    params:
+      caller: [os.getenv, os.environ]
+      path: [phantomrecon.agents.recon_logic]
+  NMAP_DISABLE:
+    type: env
+    params:
+      caller: [os.getenv, os.environ.get, os.environ]
+      path: [phantomrecon.agents.recon_logic, 'os.path.join(project_root_dir, ''.env'')']
+  NMAP_TIMEOUT:
+    type: env
+    params:
+      caller: [os.getenv, os.environ]
+      path: [phantomrecon.agents.recon_logic]
+  NMAP_TOP_PORTS:
+    type: env
+    params:
+      caller: [os.getenv, os.environ]
+      path: [phantomrecon.agents.recon_logic]
+
+files:
+  ../data/dummy_scan_output.json:
+    type: pattern
+    actions: [read]
+    params:
+      caller: [os.path.join]
+      pattern: [os.path.dirname(), ../data/dummy_scan_output.json]
+  .env:
+    type: pattern
+    actions: [read]
+    params:
+      caller: [os.path.join]
+      pattern: [project_root_dir, .env]
+  .json:
+    type: literal
+    actions: [write]
+    params:
+      caller: [tempfile.NamedTemporaryFile]
+      mode: w+
+      delete: "False"
+  dummy_file:
+    type: variable
+    actions: [read]
+    params:
+      caller: [open, json.load]
+      alias: [f]
+  html_path:
+    type: variable
+    actions: [write]
+    params:
+      caller: [open]
+      alias: [f]
+  plan_cache.pkl:
+    type: literal
+    actions: [read, write]
+    params:
+      caller: [open, pickle.load, os.path.exists]
+      alias: [f]
+  prompt_path:
+    type: variable
+    actions: [read]
+    params:
+      caller: [open]
+      alias: [f]
+  recon_cache.pkl:
+    type: literal
+    actions: [read]
+    params:
+      caller: [open, pickle.load, os.path.exists]
+      alias: [f]
+  report_path:
+    type: variable
+    actions: [write]
+    params:
+      caller: [open]
+      alias: [f]
+
+processes:
+  testssl.sh:
+    type: shell
+    actions: [exec]
+    args: [[--quiet, --json, N/A]]
+    params:
+      caller: [subprocess.run]
+      shell: ["False"]
+
+networks:
+  client:
+    type: api
+    actions: [connect]
+    protocols: [ssh]
+    ports: ["22"]
+    params:
+      caller: [_safe_ssh_connect]
+  r:
+    type: api
+    actions: [GET]
+    urls: [/version]
+    protocols: [https]
+    ports: ["6443"]
+    params:
+      caller: [test_kubernetes_api_exposure]
+  s3_url:
+    type: api
+    actions: [GET]
+    protocols: [https]
+    ports: ["443"]
+    params:
+      pattern: https://{bucket_name}.s3.amazonaws.com/
+      caller: [test_s3_bucket_permissions]
+      dynamic: "True"
+      variable: s3_url
+  url:
+    type: api
+    actions: [GET]
+    protocols: [http]
+    ports: ["80"]
+    params:
+      pattern: http://{target}:{port}/version
+      caller: [test_docker_api_exposure]
+      dynamic: "True"
+      variable: url
+  url.1:
+    type: api
+    actions: [GET]
+    protocols: [https]
+    ports: ["443"]
+    params:
+      pattern: https://{target}:6443/version
+      caller: [test_kubernetes_api_exposure]
+      dynamic: "True"
+      variable: url
